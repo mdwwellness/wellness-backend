@@ -26,7 +26,7 @@ mongoose.connection.on("disconnect",()=>{
 app.use("/api/appointments",appointmentRouter)
 app.use("/api/adddoctor",doctorRouter)
 
-app.listen(process.env.PORT ||  5000, () => {
+app.listen(process.env.PORT ||  10000, () => {
   connect();
   console.log('Connected to backend')
 })
