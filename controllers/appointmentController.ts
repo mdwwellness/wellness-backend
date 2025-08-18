@@ -17,7 +17,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
 
     //check if all fields are present
     if (!name || !location || !slot || !category || !age || !phonenumber) {
-        res.send(400).json({
+        res.status(400).send({
             success: false,
             message: "Missing required fields.",
         })
@@ -25,7 +25,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
     const existingBooking = await AppointmentBooking.findOne({ phonenumber: phonenumber });
 
     if (existingBooking) {
-        res.send(404).json({
+        res.status(404).send({
             success: false,
             message: "Already booked and appointment"
         })
@@ -33,7 +33,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
 
     const result = new AppointmentBooking(details)
     result.save()
-    res.send(200).json({
+    res.status(200).send({
         success: true,
         message: "Appointment booked",
     })
@@ -51,7 +51,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
         })
     } catch (error: any) {
         console.error("Error fetching details:", error);
-        res.status(500).json({
+        res.status(500).send({
             success: false,
             message: error.message
         });
