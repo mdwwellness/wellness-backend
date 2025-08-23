@@ -14,11 +14,10 @@ export async function addDoctor(req: Request, res: Response) {
             name,
             email,
             phonenumber,
-            password,
             specialization,
             bio
         } = details
-        if (!name || !email || !phonenumber || !password || !specialization || !doctorId) {
+        if (!name || !email || !phonenumber || !specialization || !doctorId) {
             res.status(400).send({
                 success: false,
                 message: `Missing fields ${details.filter((item: any) => item === undefined).join(", ")}`
@@ -98,4 +97,43 @@ export async function getPersonalAppointments(req: Request, res: Response) {
             message: error.message,
         })
     }
+}
+
+export async function updateDoctorDetails(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const { name, doctorId, phonenumber, email, specialization, bio } = req.body;
+    // console.log(req.body);    
+    const updatedDoctor = await Doctor.findOneAndUpdate(
+      {doctorId:id},
+      { name, doctorId, phonenumber, email, specialization, bio },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedDoctor) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    res.json({ message: "Doctor updated successfully", updatedDoctor });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error updating doctor", error });
+  }
+}
+
+export async function deleteDoctor(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+
+    const deletedDoctor = await Doctor.findOneAndDelete({doctorId:id});
+
+    if (!deletedDoctor) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    res.json({ message: "Doctor deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error deleting doctor", error });
+  }
 }

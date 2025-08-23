@@ -24,7 +24,7 @@ mongoose.connection.on("disconnect",()=>{
 })
 
 app.use("/api/appointments",appointmentRouter)
-app.use("/api/adddoctor",doctorRouter)
+app.use("/api/therapist",doctorRouter)
 
 app.listen(process.env.PORT ||  10000, () => {
   connect();

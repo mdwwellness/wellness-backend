@@ -23,7 +23,7 @@ const AppointmentBookingSchema = new Schema({
     category: {
         type: String,
         required: true,
-        enum: ["category1", "category2", "category3", "category4","category5"]
+        enum: ["cardiologist", "dermatologist", "dentist", "general-physician","neurologist","orthopedic","pediatrician","psychiatrist"]
     },
     age: {
         type: Number,
