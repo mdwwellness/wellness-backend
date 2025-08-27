@@ -46,10 +46,10 @@ export const getAllAppointments = async (req: Request, res: Response) => {
         const { role, id, email } = req.query;
         let appointmentdetails;
         if (role === "SUPER_ADMIN") {
-            appointmentdetails =await AppointmentBooking.find().exec();
+            appointmentdetails =await AppointmentBooking.find().sort({ field: 'asc', _id: -1 }).exec();
         } else if (role === "DOCTOR") {
             // Doctor can only see his appointments
-            const isExistingDoctor = await Doctor.findOne({ email }).exec();
+            const isExistingDoctor = await Doctor.findOne({ email }).sort({ field: 'asc', _id: -1 }).exec();
             if (isExistingDoctor) {
                 const doctorId = isExistingDoctor.doctorId;
                 appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId });
