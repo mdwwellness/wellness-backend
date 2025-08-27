@@ -15,6 +15,7 @@ export async function addDoctor(req: Request, res: Response) {
             email,
             phonenumber,
             specialization,
+            isActive,
             bio
         } = details
         if (!name || !email || !phonenumber || !specialization || !doctorId) {
@@ -102,11 +103,11 @@ export async function getPersonalAppointments(req: Request, res: Response) {
 export async function updateDoctorDetails(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name, doctorId, phonenumber, email, specialization, bio } = req.body;
+    const { name, doctorId, phonenumber, email, specialization, bio,isActive } = req.body;
     // console.log(req.body);    
     const updatedDoctor = await Doctor.findOneAndUpdate(
       {doctorId:id},
-      { name, doctorId, phonenumber, email, specialization, bio },
+      { name, doctorId, phonenumber, email, specialization, bio,isActive },
       { new: true, runValidators: true }
     );
 

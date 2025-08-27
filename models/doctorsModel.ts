@@ -22,6 +22,10 @@ const doctorsSchema =new mongoose.Schema({
         type:String,
         required:true,
     },
+    isActive:{
+        type:Boolean,
+        default:true,
+    },
     bio:{
         type:String,
     }

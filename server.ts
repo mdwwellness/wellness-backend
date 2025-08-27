@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 
 import appointmentRouter from "./routes/appointmentBookingRoutes.ts";
 import doctorRouter from "./routes/DoctorsRoute.ts";
+import analyticsRoute from "./routes/analyticsRoute.ts";
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ mongoose.connection.on("disconnect", () => {
 });
 
 // Routes
+app.use('/api/metrics', analyticsRoute);
 app.use("/api/appointments", appointmentRouter);
 app.use("/api/therapist", doctorRouter);
 
