@@ -62,7 +62,7 @@ export default async function GetAnalytics(req: Request, res: Response) {
             patientsInCurrentMonth: patientsInCurrentMonth.length > 0 ? patientsInCurrentMonth[0].patientsInCurrentMonth : 0,
             appointmentsInCurrentMonth,
         }
-        console.log(data);        
+        // console.log(data);        
         return res.status(200).send({
             success: true,
             data: data
