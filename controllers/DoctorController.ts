@@ -18,6 +18,7 @@ export async function addDoctor(req: Request, res: Response) {
       isActive,
       bio
     } = details
+    // console.log(details);    
     if (!name || !email || !phonenumber || !specialization || !doctorId) {
       return res.status(400).send({
         success: false,

@@ -31,7 +31,7 @@ export default async function GetAnalytics(req: Request, res: Response) {
         // Patients and appointments in the current month
         const currentMonth = new Date();
         const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-        const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59);
+        const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1,1);
 
         const patientsInCurrentMonth = await AppointmentBooking.aggregate([
             {
@@ -43,18 +43,21 @@ export default async function GetAnalytics(req: Request, res: Response) {
             },
             {
                 $group: {
-                    _id: "$email",  // Group by email to get unique patients
+                    _id: "$email",
                 },
             },
             {
                 $count: "patientsInCurrentMonth",
             },
         ]);
-
+        const completedAppointments =await AppointmentBooking.countDocuments({
+            status:"completed"
+        })
         const appointmentsInCurrentMonth = await AppointmentBooking.countDocuments({
             "slot.date": { $gte: startOfMonth, $lte: endOfMonth },
         });
         const data = {
+            completedAppointments,
             totalDoctors,
             activeDoctors,
             totalPatients,
@@ -62,7 +65,7 @@ export default async function GetAnalytics(req: Request, res: Response) {
             patientsInCurrentMonth: patientsInCurrentMonth.length > 0 ? patientsInCurrentMonth[0].patientsInCurrentMonth : 0,
             appointmentsInCurrentMonth,
         }
-        // console.log(data);        
+        // console.log(data);
         return res.status(200).send({
             success: true,
             data: data

@@ -99,7 +99,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const updateData = req.body;
-        // console.log(id,updateData);        
+        // console.log(updateData);        
         const updated = await AppointmentBooking.findByIdAndUpdate(
             id,
             updateData,

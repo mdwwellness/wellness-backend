@@ -39,7 +39,11 @@ const AppointmentBookingSchema = new Schema({
         type:String,
         required:false
     },
-
+    status:{
+        type:String,
+        enum:["completed","ongoing","cancelled","scheduled"],
+        defaul:"scheduled"
+    },
     doctor:{
         type:String,
         required:true,
