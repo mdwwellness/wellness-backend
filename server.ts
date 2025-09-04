@@ -32,7 +32,9 @@ mongoose.connection.on("disconnect", () => {
 app.use('/api/metrics', analyticsRoute);
 app.use("/api/appointments", appointmentRouter);
 app.use("/api/therapist", doctorRouter);
-
+app.get('/',(rreq,res)=>{
+  res.send("Hello there")
+})
 // Start server
 app.listen(process.env.PORT || 10000, () => {
   connect().then(() => {
