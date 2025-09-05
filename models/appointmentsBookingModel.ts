@@ -53,7 +53,7 @@ const AppointmentBookingSchema = new Schema({
         ref:"Doctor",
         required:true
     }
-})
+},{ timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);
 

@@ -52,7 +52,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
             const isExistingDoctor = await Doctor.findOne({ email }).exec();
             if (isExistingDoctor) {
                 const doctorId = isExistingDoctor.doctorId;
-                appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId });
+                appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId }).sort({createdAt:-1});
             }
         } else {
             return res.status(403).json({ message: "Forbidden: Role not allowed" });

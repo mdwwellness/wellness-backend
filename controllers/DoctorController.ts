@@ -50,9 +50,8 @@ export async function addDoctor(req: Request, res: Response) {
 
 export async function getDoctors(req: Request, res: Response) {
   try {
-    const data = Doctor.find();
+    const data = Doctor.find().sort({createdAt:-1});
     const doctorsDetails = await data.exec();
-
     if (!doctorsDetails) {
       return res.status(404).send({
         success: false,

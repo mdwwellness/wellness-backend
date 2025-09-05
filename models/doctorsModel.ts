@@ -1,34 +1,36 @@
 import mongoose from "mongoose";
 
-const doctorsSchema =new mongoose.Schema({
-    doctorId:{
-        type:String,
-        required:true,
-        unique:true
+const doctorsSchema = new mongoose.Schema({
+    doctorId: {
+        type: String,
+        required: true,
+        unique: true
     },
-    name:{
-        type:String,
-        required:true,
+    name: {
+        type: String,
+        required: true,
     },
-    email:{
-        type:String,
-        required:true,
-    }, 
-    phonenumber:{
-        type:Number,
-        required:true,
+    email: {
+        type: String,
+        required: true,
     },
-    specialization:{
-        type:String,
-        required:true,
+    phonenumber: {
+        type: Number,
+        required: true,
     },
-    isActive:{
-        type:Boolean,
-        default:true,
+    specialization: {
+        type: [String],
+        required: true,
     },
-    bio:{
-        type:String,
+    isActive: {
+        type: Boolean,
+        default: true,
+    },
+    bio: {
+        type: String,
     }
-})
+},
+    { timestamps: true, versionKey: false }
+)
 
-export const Doctor =  mongoose.model("Doctor",doctorsSchema);
+export const Doctor = mongoose.model("Doctor", doctorsSchema);
