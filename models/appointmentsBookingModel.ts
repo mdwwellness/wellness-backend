@@ -12,7 +12,7 @@ const AppointmentBookingSchema = new Schema({
             required:true,
         },
         date:{
-            type:Date,
+            type:String,
             required:true,
         }
     },
@@ -52,6 +52,12 @@ const AppointmentBookingSchema = new Schema({
         type:String,
         ref:"Doctor",
         required:true
+    },
+    therapyStartTime:{
+        type:String
+    },
+    therapyEndTime:{
+        type:String
     }
 },{ timestamps: true, versionKey: false })
 
