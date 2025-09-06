@@ -36,9 +36,7 @@ export default async function GetAnalytics(req: Request, res: Response) {
         const patientsInCurrentMonth = await AppointmentBooking.aggregate([
             {
                 $match: {
-                    slot: {
-                        date: { $gte: startOfMonth, $lte: endOfMonth },
-                    },
+                    "slot.date": { $gte: startOfMonth, $lte: endOfMonth },
                 },
             },
             {
@@ -50,6 +48,9 @@ export default async function GetAnalytics(req: Request, res: Response) {
                 $count: "patientsInCurrentMonth",
             },
         ]);
+        const totalActiveDoctors = await Doctor.countDocuments({
+            isActive:true,
+        })
         const completedAppointments =await AppointmentBooking.countDocuments({
             status:"completed"
         })
@@ -60,6 +61,7 @@ export default async function GetAnalytics(req: Request, res: Response) {
             completedAppointments,
             totalDoctors,
             activeDoctors,
+            totalActiveDoctors,
             totalPatients,
             totalAppointments,
             patientsInCurrentMonth: patientsInCurrentMonth.length > 0 ? patientsInCurrentMonth[0].patientsInCurrentMonth : 0,
