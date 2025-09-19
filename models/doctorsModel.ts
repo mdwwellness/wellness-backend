@@ -10,6 +10,11 @@ const doctorsSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    gender:{
+        type:String,
+        requied:true,
+        enum:["male","female"],
+    },
     email: {
         type: String,
         required: true,
