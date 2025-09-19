@@ -51,12 +51,10 @@ const AppointmentBookingSchema = new Schema({
     },
     doctor:{
         type:String,
-        required:true,
     },
     doctorId:{
         type:String,
         ref:"Doctor",
-        required:true
     },
     therapyStartTime:{
         type:String
