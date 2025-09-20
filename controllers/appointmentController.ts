@@ -17,7 +17,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
     } = details;
 
     //check if all fields are present
-    if (!name || !location || !slot || !age || !phonenumber) {
+    if (!name || !location || !slot || !category || !age || !phonenumber) {
         return res.status(400).send({
             success: false,
             message: "Missing required fields.",

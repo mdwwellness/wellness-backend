@@ -20,14 +20,14 @@ const AppointmentBookingSchema = new Schema({
         type: String,
         required: false,
     },
-    type:{
+    typeOfappointment:{
         type:String,
         required:true,
         enum:["consultant","appointment"]
     },
     category: {
         type: String,
-        required: false,
+        required: true,
     },
     age: {
         type: Number,
