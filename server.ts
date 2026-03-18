@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import appointmentRouter from "./routes/appointmentBookingRoutes.ts";
 import doctorRouter from "./routes/DoctorsRoute.ts";
 import analyticsRoute from "./routes/analyticsRoute.ts";
+import userRouter from "./routes/userRoute.ts";
 
 dotenv.config();
 
@@ -13,7 +14,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection
 const connect = async () => {
   try {
     await mongoose.connect(process.env.DATABASE_URL || "mongodb://127.0.0.1:27017/test");
@@ -30,9 +30,10 @@ mongoose.connection.on("disconnect", () => {
 
 // Routes
 app.use('/api/metrics', analyticsRoute);
+app.use('/api/users', userRouter);
 app.use("/api/appointments", appointmentRouter);
 app.use("/api/therapist", doctorRouter);
-app.get('/',(rreq,res)=>{
+app.get('/',(req,res)=>{
   res.send("Hello there")
 })
 // Start server
