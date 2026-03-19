@@ -47,8 +47,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
         let appointmentdetails;
         if (role === "SUPER_ADMIN") {
             appointmentdetails =await AppointmentBooking.find().sort({ field: 'asc', _id: -1 }).exec();
-        } else if (role === "DOCTOR") {
-            // Doctor can only see his appointments
+        } else if (role === "THERAPIST") {
             const isExistingDoctor = await Doctor.findOne({ email }).exec();
             if (isExistingDoctor) {
                 const doctorId = isExistingDoctor.doctorId;

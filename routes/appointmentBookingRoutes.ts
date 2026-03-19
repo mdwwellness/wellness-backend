@@ -1,12 +1,16 @@
 import express from "express";
-import { addAppointmentsDetails, deleteAppointment, getAllAppointments, updateAppointment } from "../controllers/appointmentController.ts";
-
+import {
+  addAppointmentsDetails,
+  deleteAppointment,
+  getAllAppointments,
+  updateAppointment,
+} from "../controllers/appointmentController.ts";
+import userAuth from "../middlewares/userAuth.ts";
 const appointmentRouter = express.Router();
 
+appointmentRouter.post("/", userAuth, addAppointmentsDetails);
+appointmentRouter.get("/", userAuth, getAllAppointments);
+appointmentRouter.put("/:id", userAuth, updateAppointment);
+appointmentRouter.delete("/:id", userAuth, deleteAppointment);
 
-appointmentRouter.post("/",addAppointmentsDetails)
-appointmentRouter.get("/",getAllAppointments);
-appointmentRouter.put("/:id",updateAppointment);
-appointmentRouter.delete("/:id",deleteAppointment);
-
-export default appointmentRouter
+export default appointmentRouter;

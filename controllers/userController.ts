@@ -191,6 +191,153 @@ export const adminRegisterUser = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+export const adminEditUserProfile = async (req:Request, res:Response) => {
+  try {
+    const {
+      userId,
+      userfName,
+      userlName,
+      userEmail,
+      userPhone,
+      role,
+      userPassword,
+    } = req.body;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const roleChanged = role && role !== user.role;
+    if (userfName !== undefined) user.userfName = userfName;
+    if (userlName !== undefined) user.userlName = userlName;
+    if (userEmail !== undefined) user.userEmail = userEmail;
+    if (userPhone !== undefined) user.userPhone = userPhone;
+    if (role !== undefined) user.role = role;
+
+    if (userPassword) {
+      if (userPassword.length < 6) {
+        return res
+          .status(400)
+          .json({ message: "Password must be at least 6 characters" });
+      }
+
+      user.userPassword = userPassword;
+    }
+    if (roleChanged) {
+      user.refreshToken = "";
+    }
+    await user.save();
+    return res.status(200).json({
+      success: true,
+      message: "User updated successfully",
+    });
+  } catch (error) {
+    console.error("Admin update user error:", error);
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+export const completeProfile = async (req:Request, res:Response) => {
+    try {
+        const { userfName, userlName, userEmail, userPhone, gender, dob } = req.body;
+        const userId = req.user!._id;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+        if (userEmail && userEmail !== user.userEmail) {
+            const existingEmail = await User.findOne({ 
+                userEmail, 
+                _id: { $ne: userId } 
+            });
+            if (existingEmail) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Email already taken by another user"
+                });
+            }
+        }
+        if (userPhone && userPhone !== user.userPhone) {
+            const existingPhone = await User.findOne({ 
+                userPhone, 
+                _id: { $ne: userId } 
+            });
+            if (existingPhone) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Phone number already taken by another user"
+                });
+            }
+        }
+        const updateData = {
+            userfName: userfName || user.userfName,
+            userlName: userlName || user.userlName,
+            userEmail: userEmail || user.userEmail,
+            userPhone: userPhone || user.userPhone,
+            gender: gender || user.gender || "",
+            dob: dob ? new Date(dob) : user.dob
+        };
+        const isComplete = !!(updateData.userfName && 
+                             updateData.userlName && 
+                             updateData.userEmail && 
+                             updateData.userPhone && 
+                             updateData.gender && 
+                             updateData.dob);
+
+                             const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            updateData,
+            { 
+                new: true, 
+                runValidators: true 
+            }
+        ).select("-userPassword");
+
+        res.status(200).json({
+            success: true,
+            message: "Profile updated successfully",
+            user: updatedUser,
+            profileComplete: isComplete
+        });
+
+    } catch (error:any) {
+        console.error('Complete profile error:', error);
+    
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map((err:any) => err.message);
+            return res.status(400).json({
+                success: false,
+                message: "Validation error",
+                errors: errors
+            });
+        }
+        
+        if (error.name === 'CastError') {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid user ID"
+            });
+        }
+
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern)[0];
+            return res.status(400).json({
+                success: false,
+                message: `${field === 'userEmail' ? 'Email' : 'Phone number'} already exists`
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: "Server error while updating profile",
+            error: error.message
+        });
+    }
+};
 
 export const getAllUsers = async (req: Request, res: Response) => {
   try {
@@ -220,6 +367,68 @@ export const getAllUsers = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Server error while fetching users",
+      error: error.message,
+    });
+  }
+};
+
+export const getUserById = async (req:Request, res:Response) => {
+  try {
+    const { userId } = req.params;
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID format",
+      });
+    }
+
+    const user = await User.findById(userId)
+      .select("-userPassword -refreshToken") 
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "User retrieved successfully",
+      data: {
+        user,
+      },
+    });
+  } catch (error:any) {
+    console.error("Error fetching user by ID:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching user",
+      error: error.message,
+    });
+  }
+};
+export const deleteUser = async (req:Request, res:Response) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: "User ID required" });
+    }
+
+    const deletedUser = await User.findByIdAndDelete(userId);
+
+    if (!deletedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "User deleted successfully",
+    });
+  } catch (error:any) {
+    return res.status(500).json({
+      message: "Server error",
       error: error.message,
     });
   }

@@ -2,7 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import mongoose from "mongoose";
-
+import cookieParser from "cookie-parser"
 import appointmentRouter from "./routes/appointmentBookingRoutes.ts";
 import doctorRouter from "./routes/DoctorsRoute.ts";
 import analyticsRoute from "./routes/analyticsRoute.ts";
@@ -11,8 +11,11 @@ import userRouter from "./routes/userRoute.ts";
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin:process.env.FRONT_END_URL,
+  credentials:true
+}));
+app.use(cookieParser());app.use(express.json());
 
 const connect = async () => {
   try {
