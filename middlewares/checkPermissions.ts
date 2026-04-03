@@ -1,4 +1,5 @@
-import { NextFunction, Response,Request } from "express";
+import express from "express";
+import type { NextFunction, Request, Response } from "express";
 import { ROLES } from "../lib/index.ts";
 
 const checkPermission = (requiredPermission:any) => {
