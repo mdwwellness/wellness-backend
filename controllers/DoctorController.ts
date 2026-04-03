@@ -1,4 +1,5 @@
-import { Request, Response } from "express";
+import express from "express";
+import type { Request, Response } from "express";
 import { Doctor } from "../models/doctorsModel.ts";
 import AppointmentBookingModel from "../models/appointmentsBookingModel.ts";
 import { Types } from "mongoose";

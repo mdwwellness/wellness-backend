@@ -2,7 +2,8 @@ import jwt from "jsonwebtoken";
 import User from "../models/userModel.ts";
 import bcrypt from "bcryptjs";
 import { ROLES } from "../lib/index.ts";
-import { Request, Response } from "express";
+import express from "express";
+import type { Request, Response } from "express";
 
 const generateAccessToken = (userId: string) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET || "vivo123", {

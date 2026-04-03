@@ -1,4 +1,5 @@
-import { Request, Response } from "express";
+import express from "express";
+import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 
