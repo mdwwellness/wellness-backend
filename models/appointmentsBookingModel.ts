@@ -1,68 +1,106 @@
 import mongoose, { Schema } from "mongoose";
 
 const AppointmentBookingSchema = new Schema({
+    // ── Required for every record ──
     name: {
         type: String,
         required: true,
         trim: true
     },
-    slot: {
-        time:{
-            type:String,
-            required:true,
-        },
-        date:{
-            type:Date,
-            required:true,
-        }
-    },
-    location: {
-        type: String,
-        required: false,
-    },
-    typeOfappointment:{
-        type:String,
-        required:true,
-        enum:["consultation","appointment"]
-    },
-    category: {
-        type: String,
-        required: true,
-    },
-    age: {
-        type: Number,
-        required: true,
-    },
     phonenumber: {
         type: Number,
         required: true,
     },
-    email:{
-        type:String
+
+    // ── Legacy fields: now OPTIONAL so enquiry-stage records (which don't
+    //    yet have a slot, category, etc.) can be created. Existing records
+    //    that already populate them stay valid. ──
+    slot: {
+        time: { type: String },
+        date: { type: Date },
     },
-    note:{
-        type:String,
-        required:false
+    location: {
+        type: String,
     },
-    status:{
-        type:String,
-        enum:["completed","ongoing","cancelled","scheduled"],
-        defaul:"scheduled"
+    typeOfappointment: {
+        type: String,
+        enum: ["consultation", "appointment"],
     },
-    doctor:{
-        type:String,
+    category: {
+        type: String,
     },
-    doctorId:{
-        type:String,
-        ref:"Doctor",
+    age: {
+        type: Number,
     },
-    therapyStartTime:{
-        type:String
+    email: {
+        type: String,
     },
-    therapyEndTime:{
-        type:String
-    }
-},{ timestamps: true, versionKey: false })
+    note: {
+        type: String,
+    },
+    doctor: {
+        type: String,
+    },
+    doctorId: {
+        type: String,
+        ref: "Doctor",
+    },
+    therapyStartTime: {
+        type: String,
+    },
+    therapyEndTime: {
+        type: String,
+    },
+
+    // ── NEW: structured time window the client prefers to be reached in. ──
+    //    Stored as 24-hour "HH:MM" strings; frontend renders with AM/PM.
+    preferredReachOutTime: {
+        from: { type: String },
+        to: { type: String },
+    },
+
+    // ── NEW: funnel checkpoint — executive reach-out ──
+    executiveReachedOut: {
+        type: Boolean,
+        default: false,
+    },
+    executiveReachedOutAt: {
+        type: Date,
+    },
+
+    // ── NEW: funnel checkpoint — online consultation ──
+    consultationSlot: {
+        date: { type: String },
+        time: { type: String },
+    },
+    consultationCompleted: {
+        type: Boolean,
+        default: false,
+    },
+    consultationCompletedAt: {
+        type: Date,
+    },
+
+    // ── NEW: funnel checkpoint — physio assignment ──
+    physioSlot: {
+        date: { type: String },
+        time: { type: String },
+    },
+    physioAssignmentConfirmed: {
+        type: Boolean,
+        default: false,
+    },
+    physioAssignmentConfirmedAt: {
+        type: Date,
+    },
+
+    // ── Status: added "enquiry" as first allowed value. Fixed `defaul` typo. ──
+    status: {
+        type: String,
+        enum: ["enquiry", "scheduled", "ongoing", "completed", "cancelled"],
+        default: "enquiry",
+    },
+}, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);
 
