@@ -100,6 +100,36 @@ const AppointmentBookingSchema = new Schema({
         enum: ["enquiry", "scheduled", "ongoing", "completed", "cancelled"],
         default: "enquiry",
     },
+
+    // ── Human-readable, sequential enquiry ID. Allocated atomically on creation.
+    //    Format: ENQ-0001, ENQ-0002, ... ENQ-9999, ENQ-10000.
+    //    sparse: true allows null for legacy records that haven't been backfilled. ──
+    enquiryId: {
+        type: String,
+        unique: true,
+        sparse: true,
+        index: true,
+    },
+
+    // ── Which back-office staff member is handling this lead.
+    //    Auto-populated when an executive first ticks "Mark as reached out".
+    //    Editable via dropdown in the dashboard drawer. ──
+    assignedTo: {
+        userId: { type: String },
+        name:   { type: String },
+    },
+
+    // ── Audit field: who FIRST claimed this lead (ticked reach-out or
+    //    booked a slot or otherwise advanced the funnel). Different from
+    //    assignedTo (which is the current owner and can be reassigned).
+    //    reachedOutBy is set once on first action and is intended to be
+    //    immutable in the dashboard UI for non-admin users — only admins
+    //    can override via the drawer. Backend doesn't enforce immutability;
+    //    that's a frontend concern. ──
+    reachedOutBy: {
+        userId: { type: String },
+        name:   { type: String },
+    },
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);

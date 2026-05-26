@@ -2,6 +2,7 @@ import express from "express";
 import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
+import { nextSequence } from "../lib/counters.ts";
 
 // Statuses considered "open" for the duplicate-phone check.
 // A new record with the same phone is rejected only if an OPEN record
@@ -45,6 +46,12 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
             message: "An open enquiry/appointment already exists for this phone number.",
         });
     }
+
+    // Allocate the next sequential enquiry ID (ENQ-0001, ENQ-0002, ...).
+    // 4-digit zero-padded; expands naturally to 5 digits at 10000.
+    const seq = await nextSequence("enquiry");
+    const enquiryId = `ENQ-${String(seq).padStart(4, "0")}`;
+    details.enquiryId = enquiryId;
 
     const result = new AppointmentBooking(details);
     await result.save();
