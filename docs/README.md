@@ -134,7 +134,7 @@ Defaults `"vivo123"` and `"vivo123refresh"` exist for local dev but you
 | Every HTTP endpoint, its payload shape, and what it returns | [api.md](api.md) |
 | What's in each Mongoose collection + relationships between them | [models.md](models.md) |
 | Security holes / bugs / dead code I should be aware of before I touch things | [known-issues.md](known-issues.md) |
-| The executive enquiries dashboard feature (spec + funnel design) | the spec in `WellnessFrontend/docs/superpowers/specs/2026-05-26-executive-enquiries-dashboard-design.md` |
+| Owner-level / business overview of the dashboard | `WellnessFrontend/docs/team/owner-guide.md` in the frontend repo |
 
 ## Codebase tour
 
