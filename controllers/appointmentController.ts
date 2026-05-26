@@ -8,6 +8,16 @@ import { Doctor } from "../models/doctorsModel.ts";
 // already exists; cancelled / completed records don't block re-engagement.
 const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
 
+// Back-office roles that see every appointment / enquiry record.
+// THERAPIST is intentionally NOT in this set — therapists see only their
+// own assigned records (filtered by doctorId).
+const BACK_OFFICE_ROLES = new Set([
+    "SUPER_ADMIN",
+    "ADMIN",
+    "STAFF",
+    "CUSTOMER_CARE",
+]);
+
 export const addAppointmentsDetails = async (req: Request, res: Response) => {
     const details = req.body;
     const { name, phonenumber } = details;
@@ -48,19 +58,37 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
 
 export const getAllAppointments = async (req: Request, res: Response) => {
     try {
-        const { role, id, email } = req.query;
-        let appointmentdetails;
-        if (role === "SUPER_ADMIN") {
-            appointmentdetails = await AppointmentBooking.find().sort({ field: 'asc', _id: -1 }).exec();
+        // Trust the server-verified user from JWT (set by userAuth middleware),
+        // NOT the client-supplied ?role= query param — that was spoofable and
+        // also broke for back-office roles other than SUPER_ADMIN.
+        const role = req.user?.role;
+        const userEmail = req.user?.userEmail;
+
+        let appointmentdetails: any[] = [];
+
+        if (role && BACK_OFFICE_ROLES.has(role)) {
+            // Back-office staff (SUPER_ADMIN, ADMIN, STAFF, CUSTOMER_CARE)
+            // see every appointment / enquiry record.
+            appointmentdetails = await AppointmentBooking.find()
+                .sort({ createdAt: -1 })
+                .exec();
         } else if (role === "THERAPIST") {
-            const isExistingDoctor = await Doctor.findOne({ email }).exec();
+            // Therapists see only the appointments assigned to them.
+            const isExistingDoctor = await Doctor.findOne({ email: userEmail }).exec();
             if (isExistingDoctor) {
                 const doctorId = isExistingDoctor.doctorId;
-                appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId }).sort({ createdAt: -1 });
+                appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId })
+                    .sort({ createdAt: -1 });
+            } else {
+                appointmentdetails = [];
             }
         } else {
-            return res.status(403).json({ message: "Forbidden: Role not allowed" });
+            return res.status(403).json({
+                success: false,
+                message: "Forbidden: Role not allowed",
+            });
         }
+
         return res.status(200).send({
             success: true,
             data: appointmentdetails,
