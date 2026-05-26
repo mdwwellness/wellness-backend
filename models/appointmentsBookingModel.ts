@@ -118,6 +118,18 @@ const AppointmentBookingSchema = new Schema({
         userId: { type: String },
         name:   { type: String },
     },
+
+    // ── Audit field: who FIRST claimed this lead (ticked reach-out or
+    //    booked a slot or otherwise advanced the funnel). Different from
+    //    assignedTo (which is the current owner and can be reassigned).
+    //    reachedOutBy is set once on first action and is intended to be
+    //    immutable in the dashboard UI for non-admin users — only admins
+    //    can override via the drawer. Backend doesn't enforce immutability;
+    //    that's a frontend concern. ──
+    reachedOutBy: {
+        userId: { type: String },
+        name:   { type: String },
+    },
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);
