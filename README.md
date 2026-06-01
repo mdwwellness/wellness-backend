@@ -1,4 +1,4 @@
-# MyDawaiWala — Wellness Backend
+# MyDawaiWala - Wellness Backend
 
 Express 5 + Mongoose 8 + TypeScript REST API powering the MDW wellness /
 therapy booking platform. Deployed on Render at
