@@ -2,7 +2,7 @@
 
 Express 5 + Mongoose 8 + TypeScript REST API powering the MDW wellness /
 therapy booking platform. Deployed on Render at
-`https://wellnessbackend-8fxe.onrender.com`.
+`https://wellness-backend-1-wya5.onrender.com`.
 
 ## 📚 Documentation
 
