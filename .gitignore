@@ -1,2 +1,6 @@
 /node_modules
+
+# Env files — ignore real env files, keep the committed example
 /.env
+/.env.*
+!/.env.example
