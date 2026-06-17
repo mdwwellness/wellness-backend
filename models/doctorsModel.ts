@@ -33,7 +33,18 @@ const doctorsSchema = new mongoose.Schema({
     },
     bio: {
         type: String,
-    }
+    },
+    // ── Media managed from the dashboard (uploaded via UploadThing) ──
+    profileImage: {
+        type: String,
+    },
+    certificates: [
+        {
+            label: { type: String },
+            url: { type: String },
+            _id: false,
+        },
+    ],
 },
     { timestamps: true, versionKey: false }
 )

@@ -7,6 +7,7 @@ import appointmentRouter from "./routes/appointmentBookingRoutes.ts";
 import doctorRouter from "./routes/DoctorsRoute.ts";
 import analyticsRoute from "./routes/analyticsRoute.ts";
 import userRouter from "./routes/userRoute.ts";
+import serviceRouter from "./routes/serviceRoutes.ts";
 
 dotenv.config();
 
@@ -41,6 +42,7 @@ app.use("/api/metrics", analyticsRoute);
 app.use("/api/users", userRouter);
 app.use("/api/appointments", appointmentRouter);
 app.use("/api/therapist", doctorRouter);
+app.use("/api/services", serviceRouter);
 app.get("/", (req, res) => {
   res.json({
     message: "Welcome to the MDW Wellness Backend",

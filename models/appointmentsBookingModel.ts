@@ -130,6 +130,43 @@ const AppointmentBookingSchema = new Schema({
         userId: { type: String },
         name:   { type: String },
     },
+
+    // ── Append-only activity log: who did what, when (dashboard audit). ──
+    activityLog: [
+        {
+            at:     { type: String },
+            userId: { type: String },
+            name:   { type: String },
+            action: { type: String },
+            _id: false,
+        },
+    ],
+
+    // ── Reason captured when a status is manually overridden (e.g. cancel). ──
+    statusNote: {
+        type: String,
+    },
+
+    // ── Funnel checkpoint — payment (patient → clinic) ──
+    paymentReceived: {
+        type: Boolean,
+        default: false,
+    },
+    paymentAmount: {
+        type: Number,
+    },
+    paymentMethod: {
+        type: String,
+        enum: ["cash", "upi", "card", "bank", "other"],
+    },
+    paymentReceivedAt: {
+        type: Date,
+    },
+
+    // ── Funnel checkpoint — completion ──
+    completedAt: {
+        type: Date,
+    },
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);
