@@ -167,6 +167,11 @@ const AppointmentBookingSchema = new Schema({
     completedAt: {
         type: Date,
     },
+
+    // ── Origin of the record: "public_booking_form" | "dashboard" | undefined ──
+    source: {
+        type: String,
+    },
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);

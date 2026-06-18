@@ -160,3 +160,104 @@ export const updateAppointment = async (req: Request, res: Response) => {
         });
     }
 };
+
+// ── Public booking endpoint (NO auth) ─────────────────────────────────────────
+// Used by the public mdw patient site's booking form. Simple per-IP rate limit.
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_PER_MINUTE = 5;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function tooManyRequests(ip: string): boolean {
+    const now = Date.now();
+    const bucket = rateLimitBuckets.get(ip);
+    if (!bucket || bucket.resetAt < now) {
+        rateLimitBuckets.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        return false;
+    }
+    bucket.count++;
+    return bucket.count > RATE_LIMIT_PER_MINUTE;
+}
+
+export const addPublicEnquiry = async (req: Request, res: Response) => {
+    try {
+        const ip =
+            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+            req.socket.remoteAddress ||
+            "unknown";
+
+        if (tooManyRequests(ip)) {
+            return res.status(429).send({
+                success: false,
+                message: "Too many submissions. Please try again in a minute.",
+            });
+        }
+
+        const {
+            name,
+            phonenumber,
+            email,
+            location,
+            typeOfappointment,
+            preferredReachOutTime,
+            note,
+            source,
+        } = req.body;
+
+        if (!name || typeof name !== "string" || name.trim().length < 2) {
+            return res.status(400).send({
+                success: false,
+                message: "Name is required (at least 2 characters).",
+            });
+        }
+        if (!phonenumber || typeof phonenumber !== "number") {
+            return res.status(400).send({
+                success: false,
+                message: "Phone number is required (numeric).",
+            });
+        }
+
+        // Duplicate-phone check — mirror the authed endpoint. Don't create a
+        // second open record for the same number; just acknowledge.
+        const existing = await AppointmentBooking.findOne({
+            phonenumber,
+            status: { $in: OPEN_STATUSES },
+        });
+        if (existing) {
+            return res.status(200).send({
+                success: true,
+                message:
+                    "We already have an open enquiry for this number. Our team will reach out.",
+                data: { enquiryId: existing.enquiryId },
+            });
+        }
+
+        const seq = await nextSequence("enquiry");
+        const enquiryId = `ENQ-${String(seq).padStart(4, "0")}`;
+
+        const record = new AppointmentBooking({
+            name: name.trim(),
+            phonenumber,
+            email: email || undefined,
+            location: location || undefined,
+            typeOfappointment: typeOfappointment || undefined,
+            preferredReachOutTime: preferredReachOutTime || undefined,
+            note: note || undefined,
+            source: source || "public_booking_form",
+            status: "enquiry",
+            enquiryId,
+        });
+        await record.save();
+
+        return res.status(201).send({
+            success: true,
+            message: "Booking received — our team will reach out shortly.",
+            data: { enquiryId },
+        });
+    } catch (error: any) {
+        console.error("[addPublicEnquiry]", error);
+        return res.status(500).send({
+            success: false,
+            message: "Server error — please try again.",
+        });
+    }
+};

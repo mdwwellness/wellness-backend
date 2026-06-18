@@ -12,9 +12,26 @@ import serviceRouter from "./routes/serviceRoutes.ts";
 dotenv.config();
 
 const app = express();
+const allowedOrigins = [
+  process.env.FRONT_END_URL, // back-office dashboard
+  process.env.PUBLIC_SITE_URL, // public mdw patient site
+  "http://localhost:3000",
+  "http://localhost:3001",
+].filter(Boolean) as string[];
+
 app.use(
   cors({
-    origin: process.env.FRONT_END_URL,
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      // No Origin header = same-origin / server-to-server (e.g. curl) — allow.
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    },
     credentials: true,
   }),
 );
