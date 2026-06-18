@@ -13,11 +13,15 @@ dotenv.config();
 
 const app = express();
 const allowedOrigins = [
-  process.env.FRONT_END_URL, // back-office dashboard
-  process.env.PUBLIC_SITE_URL, // public mdw patient site
-  "http://localhost:3000",
-  "http://localhost:3001",
+  process.env.FRONT_END_URL, // back-office dashboard (prod)
+  process.env.PUBLIC_SITE_URL, // public mdw patient site (prod)
 ].filter(Boolean) as string[];
+
+// Any localhost / 127.0.0.1 port is allowed for local dev (e.g. dashboard on
+// :3000, patient site on :3003). The browser sets Origin, so only pages truly
+// served from localhost match — safe to allow.
+const isLocalhost = (origin: string) =>
+  /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
 app.use(
   cors({
@@ -26,7 +30,7 @@ app.use(
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
       // No Origin header = same-origin / server-to-server (e.g. curl) — allow.
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || isLocalhost(origin) || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS: origin ${origin} not allowed`));
