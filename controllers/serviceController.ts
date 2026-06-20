@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import Service from "../models/serviceModel.ts";
 import { nextSequence } from "../lib/counters.ts";
+import { logger } from "../lib/logger.ts";
 
 export const addService = async (req: Request, res: Response) => {
     try {
@@ -18,6 +19,7 @@ export const addService = async (req: Request, res: Response) => {
 
         const service = new Service({ ...req.body, serviceId });
         await service.save();
+        logger.info("Service created", { serviceId });
 
         return res.status(200).send({
             success: true,

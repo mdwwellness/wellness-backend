@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { Doctor } from "../models/doctorsModel.ts";
 import AppointmentBookingModel from "../models/appointmentsBookingModel.ts";
 import { Types } from "mongoose";
+import { logger } from "../lib/logger.ts";
 
 
 
@@ -35,7 +36,8 @@ export async function addDoctor(req: Request, res: Response) {
       })
     }
     const saveDoctor = new Doctor(details);
-    saveDoctor.save()
+    await saveDoctor.save()
+    logger.info("Therapist created", { doctorId })
     return res.status(200).send({
       success: true,
       message: "Doctor added successfully"
