@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 import { nextSequence } from "../lib/counters.ts";
+import { logger } from "../lib/logger.ts";
 
 // Statuses considered "open" for the duplicate-phone check.
 // A new record with the same phone is rejected only if an OPEN record
@@ -55,6 +56,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
 
     const result = new AppointmentBooking(details);
     await result.save();
+    logger.info("Enquiry created (dashboard)", { enquiryId, phonenumber });
     return res.status(200).send({
         success: true,
         message: "Appointment booked",
@@ -216,18 +218,48 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             });
         }
 
-        // Duplicate-phone check — mirror the authed endpoint. Don't create a
-        // second open record for the same number; just acknowledge.
+        // Repeat-submission handling. If this number already has an OPEN lead,
+        // we DON'T create a duplicate row. Instead we fold the repeat into the
+        // existing lead: bump its repeatCount and append the new submission to
+        // its activity log so staff can see any corrected details (they
+        // reconcile the lead's fields manually).
         const existing = await AppointmentBooking.findOne({
             phonenumber,
             status: { $in: OPEN_STATUSES },
         });
         if (existing) {
+            const repeatNumber = (existing.repeatCount ?? 1) + 1;
+
+            const detailBits: string[] = [];
+            if (typeOfappointment) detailBits.push(`type: ${typeOfappointment}`);
+            if (location) detailBits.push(`location: ${location}`);
+            if (preferredReachOutTime?.from || preferredReachOutTime?.to) {
+                detailBits.push(
+                    `time: ${preferredReachOutTime?.from ?? "?"}–${preferredReachOutTime?.to ?? "?"}`,
+                );
+            }
+            if (note) detailBits.push(`note: ${note}`);
+            const action = `Re-submitted via public form (#${repeatNumber})${
+                detailBits.length ? " — " + detailBits.join(", ") : ""
+            }`;
+
+            existing.repeatCount = repeatNumber;
+            existing.activityLog.push({
+                at: new Date().toISOString(),
+                name: name.trim(),
+                action,
+            });
+            await existing.save();
+            logger.info("Public booking repeat folded into existing lead", {
+                enquiryId: existing.enquiryId,
+                repeatCount: repeatNumber,
+            });
+
             return res.status(200).send({
                 success: true,
                 message:
-                    "We already have an open enquiry for this number. Our team will reach out.",
-                data: { enquiryId: existing.enquiryId },
+                    "Thanks! We already have your enquiry — our team will reach out, and we've noted your latest details.",
+                data: { enquiryId: existing.enquiryId, repeatCount: repeatNumber },
             });
         }
 
@@ -247,6 +279,10 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             enquiryId,
         });
         await record.save();
+        logger.info("Public booking created", {
+            enquiryId,
+            source: source || "public_booking_form",
+        });
 
         return res.status(201).send({
             success: true,

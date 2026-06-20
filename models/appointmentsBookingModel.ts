@@ -172,6 +172,14 @@ const AppointmentBookingSchema = new Schema({
     source: {
         type: String,
     },
+
+    // ── How many times this person submitted a booking while this lead stayed
+    //    OPEN. Starts at 1; each repeat public submission bumps it (and is
+    //    logged in activityLog) instead of creating a duplicate row. ──
+    repeatCount: {
+        type: Number,
+        default: 1,
+    },
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);
