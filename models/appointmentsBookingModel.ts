@@ -180,6 +180,17 @@ const AppointmentBookingSchema = new Schema({
         type: Number,
         default: 1,
     },
+
+    // ── Follow-up tracking: how many times an executive tried to call this lead
+    //    but couldn't connect (no answer). Drives the /dashboard/follow-ups view.
+    //    Stays at 0 for fresh, never-attempted leads. ──
+    reachAttempts: {
+        type: Number,
+        default: 0,
+    },
+    lastAttemptAt: {
+        type: Date,
+    },
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);
