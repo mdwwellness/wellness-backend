@@ -36,6 +36,18 @@ const serviceSchema = new Schema(
         hsnCode: {
             type: String,
         },
+        // ── Package metadata (catalogue model only — no session/billing ops) ──
+        isPackage: {
+            type: Boolean,
+            default: false,
+        },
+        sessions: {
+            type: Number,
+        },
+        billingCycle: {
+            type: String,
+            enum: ["one-time", "monthly", "quarterly"],
+        },
     },
     { timestamps: true, versionKey: false },
 );
