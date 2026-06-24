@@ -203,6 +203,8 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             preferredReachOutTime,
             note,
             source,
+            service,
+            vitals,
         } = req.body;
 
         if (!name || typeof name !== "string" || name.trim().length < 2) {
@@ -275,6 +277,8 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             preferredReachOutTime: preferredReachOutTime || undefined,
             note: note || undefined,
             source: source || "public_booking_form",
+            service: service || undefined,
+            vitals: Array.isArray(vitals) && vitals.length ? vitals : undefined,
             status: "enquiry",
             enquiryId,
         });

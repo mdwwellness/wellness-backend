@@ -29,6 +29,15 @@ const AppointmentBookingSchema = new Schema({
     category: {
         type: String,
     },
+
+    // ── Which offering the customer is approaching (from the public site):
+    //    "Online Consultation" | "Home Therapy" | "Vitals Check". ──
+    service: {
+        type: String,
+    },
+    // ── Vitals Check sub-selections (e.g. "Blood Pressure (BP)", "Blood Sugar",
+    //    "Other: ..."). Empty for non-vitals services. ──
+    vitals: [{ type: String }],
     age: {
         type: Number,
     },
