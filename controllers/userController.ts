@@ -4,8 +4,6 @@ import bcrypt from "bcryptjs";
 import { ROLES } from "../lib/index.ts";
 import express from "express";
 import type { Request, Response } from "express";
-import { Doctor } from "../models/doctorsModel.ts";
-import { nextSequence } from "../lib/counters.ts";
 
 const generateAccessToken = (userId: string) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET || "vivo123", {
@@ -177,27 +175,6 @@ export const adminRegisterUser = async (req: Request, res: Response) => {
       role: userRole,
     });
     await newUser.save();
-
-    // Therapists also need a Doctor record so they appear in the Therapist List
-    // and the login scoping (email → doctorId) works. Auto-create a minimal one
-    // with a dynamic THR-#### id; the admin enriches specialization/photo later.
-    if (userRole === "THERAPIST") {
-      try {
-        const existingDoctor = await Doctor.findOne({ email: userEmail }).exec();
-        if (!existingDoctor) {
-          const seq = await nextSequence("therapist");
-          await Doctor.create({
-            doctorId: `THR-${String(seq).padStart(4, "0")}`,
-            name: `${userfName ?? ""} ${userlName ?? ""}`.trim() || userEmail,
-            email: userEmail,
-            phonenumber: Number(userPhone) || 0,
-            specialization: [],
-          });
-        }
-      } catch (e: any) {
-        console.warn("[adminRegisterUser] therapist auto-create failed:", e?.message);
-      }
-    }
 
     res.status(201).json({
       success: true,

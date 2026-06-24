@@ -6,6 +6,12 @@ const doctorsSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
+    // Link to the login account (User._id). Therapists are created with both a
+    // Doctor (this roster profile) and a User (login); this ties them together
+    // so appointment scoping survives email changes.
+    userId: {
+        type: String,
+    },
     name: {
         type: String,
         required: true,

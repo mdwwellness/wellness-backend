@@ -76,6 +76,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
         // also broke for back-office roles other than SUPER_ADMIN.
         const role = req.user?.role;
         const userEmail = req.user?.userEmail;
+        const userId = (req.user as any)?.id ?? (req.user as any)?._id;
 
         let appointmentdetails: any[] = [];
 
@@ -86,8 +87,13 @@ export const getAllAppointments = async (req: Request, res: Response) => {
                 .sort({ createdAt: -1 })
                 .exec();
         } else if (role === "THERAPIST") {
-            // Therapists see only the appointments assigned to them.
-            const isExistingDoctor = await Doctor.findOne({ email: userEmail }).exec();
+            // Therapists see only the appointments assigned to them. Resolve
+            // their Doctor profile by the linked userId (robust to email edits),
+            // falling back to email for older records.
+            const doctorQuery: any = userId
+                ? { $or: [{ userId: String(userId) }, { email: userEmail }] }
+                : { email: userEmail };
+            const isExistingDoctor = await Doctor.findOne(doctorQuery).exec();
             if (isExistingDoctor) {
                 const doctorId = isExistingDoctor.doctorId;
                 appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId })
