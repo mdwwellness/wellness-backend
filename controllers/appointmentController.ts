@@ -36,16 +36,20 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
 
     // Status-aware duplicate-phone check.
     // Allow re-engagement when previous records are cancelled or completed.
-    const existingBooking = await AppointmentBooking.findOne({
-        phonenumber: phonenumber,
-        status: { $in: OPEN_STATUSES },
-    });
-
-    if (existingBooking) {
-        return res.status(409).send({
-            success: false,
-            message: "An open enquiry/appointment already exists for this phone number.",
+    // Recommended bookings are intentional second records for a patient who is
+    // already in an open appointment, so they bypass this guard.
+    if (details.appointmentKind !== "recommended") {
+        const existingBooking = await AppointmentBooking.findOne({
+            phonenumber: phonenumber,
+            status: { $in: OPEN_STATUSES },
         });
+
+        if (existingBooking) {
+            return res.status(409).send({
+                success: false,
+                message: "An open enquiry/appointment already exists for this phone number.",
+            });
+        }
     }
 
     // Allocate the next sequential enquiry ID (ENQ-0001, ENQ-0002, ...).

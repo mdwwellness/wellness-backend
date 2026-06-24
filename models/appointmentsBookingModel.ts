@@ -200,6 +200,25 @@ const AppointmentBookingSchema = new Schema({
     lastAttemptAt: {
         type: Date,
     },
+
+    // ── Therapist recommendation flow ──
+    // "new" = a normal booking; "recommended" = a service a therapist suggested
+    // during a visit (booked at the service's recommended/discounted price).
+    appointmentKind: {
+        type: String,
+        enum: ["new", "recommended"],
+        default: "new",
+    },
+    // Price agreed at booking time (captured so it's stable if the service price
+    // later changes). For recommended bookings this is the recommended price.
+    quotedPrice: {
+        type: Number,
+    },
+    // The originating appointment's _id when this was created via "Recommend a
+    // service" (for traceability).
+    recommendedFrom: {
+        type: String,
+    },
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);

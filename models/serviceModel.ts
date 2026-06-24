@@ -23,6 +23,12 @@ const serviceSchema = new Schema(
             required: true,
             min: 0,
         },
+        // Discounted price used when a therapist recommends this service during a
+        // visit (the "recommended price"). Optional; falls back to price if unset.
+        recommendedPrice: {
+            type: Number,
+            min: 0,
+        },
         category: {
             type: String,
             required: true,
