@@ -4,6 +4,7 @@ import { Doctor } from "../models/doctorsModel.ts";
 import AppointmentBookingModel from "../models/appointmentsBookingModel.ts";
 import { Types } from "mongoose";
 import { logger } from "../lib/logger.ts";
+import { nextSequence } from "../lib/counters.ts";
 
 
 
@@ -11,21 +12,13 @@ export async function addDoctor(req: Request, res: Response) {
   try {
 
     const details = req.body;
-    const {
-      doctorId,
-      name,
-      email,
-      phonenumber,
-      specialization,
-      isActive,
-      bio
-    } = details
-    // console.log(details);    
-    if (!name || !email || !phonenumber || !specialization || !doctorId) {
+    const { doctorId, name, email, phonenumber } = details;
+
+    if (!name || !email || !phonenumber) {
       return res.status(400).send({
         success: false,
-        message: `Missing fields ${details.filter((item: any) => item === undefined).join(", ")}`
-      })
+        message: "Name, email and phone number are required.",
+      });
     }
 
     const existingDoctor = await Doctor.findOne({ email }).exec();
@@ -35,9 +28,15 @@ export async function addDoctor(req: Request, res: Response) {
         message: "A doctor already exist with this email"
       })
     }
-    const saveDoctor = new Doctor(details);
+
+    // Auto-allocate a therapist ID (THR-####) when one isn't supplied.
+    const finalDoctorId =
+      doctorId ||
+      `THR-${String(await nextSequence("therapist")).padStart(4, "0")}`;
+
+    const saveDoctor = new Doctor({ ...details, doctorId: finalDoctorId });
     await saveDoctor.save()
-    logger.info("Therapist created", { doctorId })
+    logger.info("Therapist created", { doctorId: finalDoctorId })
     return res.status(200).send({
       success: true,
       message: "Doctor added successfully"

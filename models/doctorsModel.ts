@@ -25,7 +25,7 @@ const doctorsSchema = new mongoose.Schema({
     },
     specialization: {
         type: [String],
-        required: true,
+        default: [],
     },
     isActive: {
         type: Boolean,
