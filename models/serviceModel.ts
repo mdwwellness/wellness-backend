@@ -36,17 +36,19 @@ const serviceSchema = new Schema(
         hsnCode: {
             type: String,
         },
-        // ── Package metadata (catalogue model only — no session/billing ops) ──
+        // ── Package metadata (catalogue model only) ──
+        // packageUnit chooses the metric: "sessions" (therapy) OR "weeks"/"months"
+        // (vitals plans). packageCount holds the number.
         isPackage: {
             type: Boolean,
             default: false,
         },
-        sessions: {
-            type: Number,
-        },
-        billingCycle: {
+        packageUnit: {
             type: String,
-            enum: ["one-time", "monthly", "quarterly"],
+            enum: ["sessions", "weeks", "months"],
+        },
+        packageCount: {
+            type: Number,
         },
     },
     { timestamps: true, versionKey: false },
