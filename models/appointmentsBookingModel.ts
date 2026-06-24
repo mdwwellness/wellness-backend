@@ -177,6 +177,10 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
+    // ── Therapist work checklist — completed item keys
+    //    (e.g. "arrived", "performed", "payment", "completed"). ──
+    workChecklist: [{ type: String }],
+
     // ── Origin of the record: "public_booking_form" | "dashboard" | undefined ──
     source: {
         type: String,
