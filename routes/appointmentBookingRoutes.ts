@@ -1,6 +1,8 @@
 import express from "express";
 import {
   addAppointmentsDetails,
+  addAppointmentRecommendation,
+  confirmAppointmentRecommendation,
   addPublicEnquiry,
   deleteAppointment,
   getAllAppointments,
@@ -15,6 +17,8 @@ appointmentRouter.post("/public", addPublicEnquiry);
 
 appointmentRouter.post("/", userAuth, addAppointmentsDetails);
 appointmentRouter.get("/", userAuth, getAllAppointments);
+appointmentRouter.post("/:id/recommendations", userAuth, addAppointmentRecommendation);
+appointmentRouter.post("/:id/recommendations/confirm", userAuth, confirmAppointmentRecommendation);
 appointmentRouter.put("/:id", userAuth, updateAppointment);
 appointmentRouter.delete("/:id", userAuth, deleteAppointment);
 

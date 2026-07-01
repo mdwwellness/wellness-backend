@@ -16,3 +16,14 @@ export async function nextSequence(name: string): Promise<number> {
     );
     return result?.seq ?? 1;
 }
+
+/**
+ * Atomically allocate the next sequence value for a named counter *within a
+ * specific calendar year*.
+ *
+ * Internally this stores counters as:
+ *   { _id: `${type}-${year}`, seq: 42 }
+ */
+export async function nextYearlySequence(type: string, year: number): Promise<number> {
+  return nextSequence(`${type}-${year}`);
+}

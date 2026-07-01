@@ -35,6 +35,12 @@ const AppointmentBookingSchema = new Schema({
     service: {
         type: String,
     },
+    // ── Therapy session package (catalogue serviceId, e.g. SRV-0003). ──
+    //    Used for "2 of 6 sessions completed" progress — separate from `service`
+    //    which tracks the public-site funnel offering. ──
+    packageServiceId: {
+        type: String,
+    },
     // ── Vitals Check sub-selections (e.g. "Blood Pressure (BP)", "Blood Sugar",
     //    "Other: ..."). Empty for non-vitals services. ──
     vitals: [{ type: String }],
@@ -219,10 +225,34 @@ const AppointmentBookingSchema = new Schema({
         type: Number,
     },
     // The originating appointment's _id when this was created via "Recommend a
-    // service" (for traceability).
+    // service" (legacy — new flow stacks on recommendedServices instead).
     recommendedFrom: {
         type: String,
     },
+
+    // ── Therapist-recommended add-ons stacked on THIS visit (no new row). ──
+    recommendedServices: [
+        {
+            serviceId: { type: String, required: true },
+            serviceName: { type: String, required: true },
+            category: { type: String },
+            quotedPrice: { type: Number, required: true },
+            slot: {
+                date: { type: String },
+                time: { type: String },
+            },
+            status: {
+                type: String,
+                enum: ["pending", "confirmed"],
+                default: "pending",
+            },
+            recommendedAt: { type: String, required: true },
+            recommendedBy: { type: String },
+            confirmedAt: { type: String },
+            confirmedBy: { type: String },
+            _id: false,
+        },
+    ],
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);

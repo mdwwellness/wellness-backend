@@ -4,10 +4,12 @@ import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { logger } from "../lib/logger.ts";
+import {
+    ensureCustomerForAppointment,
+    maybeCreateInvoiceForAppointment,
+} from "../lib/invoiceGeneration.ts";
 
-// Statuses considered "open" for the duplicate-phone check.
-// A new record with the same phone is rejected only if an OPEN record
-// already exists; cancelled / completed records don't block re-engagement.
+// Statuses considered "open" for public-form repeat folding (see addPublicEnquiry).
 const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
 
 // Back-office roles that see every appointment / enquiry record.
@@ -34,23 +36,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
         });
     }
 
-    // Status-aware duplicate-phone check.
-    // Allow re-engagement when previous records are cancelled or completed.
-    // Recommended bookings are intentional second records for a patient who is
-    // already in an open appointment, so they bypass this guard.
-    if (details.appointmentKind !== "recommended") {
-        const existingBooking = await AppointmentBooking.findOne({
-            phonenumber: phonenumber,
-            status: { $in: OPEN_STATUSES },
-        });
-
-        if (existingBooking) {
-            return res.status(409).send({
-                success: false,
-                message: "An open enquiry/appointment already exists for this phone number.",
-            });
-        }
-    }
+    // Same phone may log multiple enquiries — each gets its own ENQ-#### row.
 
     // Allocate the next sequential enquiry ID (ENQ-0001, ENQ-0002, ...).
     // 4-digit zero-padded; expands naturally to 5 digits at 10000.
@@ -61,6 +47,17 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
     const result = new AppointmentBooking(details);
     await result.save();
     logger.info("Enquiry created (dashboard)", { enquiryId, phonenumber });
+
+    await ensureCustomerForAppointment(result);
+
+    const actor = {
+        name: (req.user as any)?.userfName
+            ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+            : undefined,
+        email: (req.user as any)?.userEmail,
+    };
+    await maybeCreateInvoiceForAppointment({ appointment: result, actor });
+
     return res.status(200).send({
         success: true,
         message: "Appointment booked",
@@ -145,20 +142,214 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     }
 };
 
-export const updateAppointment = async (req: Request, res: Response) => {
+export const addAppointmentRecommendation = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
+        const { serviceId, serviceName, category, quotedPrice, slot } = req.body ?? {};
+
+        if (!serviceId || typeof serviceId !== "string") {
+            return res.status(400).send({
+                success: false,
+                message: "serviceId is required.",
+            });
+        }
+        if (!serviceName || typeof serviceName !== "string") {
+            return res.status(400).send({
+                success: false,
+                message: "serviceName is required.",
+            });
+        }
+        if (quotedPrice == null || typeof quotedPrice !== "number" || quotedPrice < 0) {
+            return res.status(400).send({
+                success: false,
+                message: "quotedPrice is required and must be a non-negative number.",
+            });
+        }
+
+        const appointment = await AppointmentBooking.findById(id).exec();
+        if (!appointment) {
+            return res.status(404).send({
+                success: false,
+                message: "Appointment not found",
+            });
+        }
+
+        if (appointment.appointmentKind === "recommended") {
+            return res.status(400).send({
+                success: false,
+                message:
+                    "Cannot add recommendations to a legacy recommended row. Open the parent appointment instead.",
+            });
+        }
+
+        const actorName = (req.user as any)?.userfName
+            ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+            : (req.user as any)?.userEmail ?? "Therapist";
+
+        const entry = {
+            serviceId,
+            serviceName: serviceName.trim(),
+            category: category ?? "",
+            quotedPrice,
+            slot:
+                slot?.date || slot?.time
+                    ? { date: slot.date ?? "", time: slot.time ?? "" }
+                    : undefined,
+            recommendedAt: new Date().toISOString(),
+            recommendedBy: actorName,
+            status: "pending",
+        };
+
+        const logEntry = {
+            at: entry.recommendedAt,
+            userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
+            name: actorName,
+            action: `Recommended add-on: ${entry.serviceName} (₹${quotedPrice})`,
+        };
+
         const updated = await AppointmentBooking.findByIdAndUpdate(
             id,
-            updateData,
-        );
+            {
+                $push: {
+                    recommendedServices: entry,
+                    activityLog: logEntry,
+                },
+            },
+            { new: true },
+        ).exec();
+
         if (!updated) {
             return res.status(404).send({
                 success: false,
                 message: "Appointment not found",
             });
         }
+
+        logger.info("Service recommendation stacked on appointment", {
+            appointmentId: id,
+            serviceId,
+        });
+
+        return res.status(200).send({
+            success: true,
+            message: "Recommendation added to this visit",
+            data: updated,
+        });
+    } catch (error: any) {
+        return res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+export const confirmAppointmentRecommendation = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { serviceId, recommendedAt } = req.body ?? {};
+
+        if (!serviceId || typeof serviceId !== "string") {
+            return res.status(400).send({
+                success: false,
+                message: "serviceId is required.",
+            });
+        }
+        if (!recommendedAt || typeof recommendedAt !== "string") {
+            return res.status(400).send({
+                success: false,
+                message: "recommendedAt is required.",
+            });
+        }
+
+        const appointment = await AppointmentBooking.findById(id).exec();
+        if (!appointment) {
+            return res.status(404).send({
+                success: false,
+                message: "Appointment not found",
+            });
+        }
+
+        const recs = appointment.recommendedServices ?? [];
+        const idx = recs.findIndex(
+            (r) => r.serviceId === serviceId && r.recommendedAt === recommendedAt,
+        );
+        if (idx < 0) {
+            return res.status(404).send({
+                success: false,
+                message: "Recommendation not found on this visit.",
+            });
+        }
+
+        const actorName = (req.user as any)?.userfName
+            ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+            : (req.user as any)?.userEmail ?? "Staff";
+
+        const confirmedAt = new Date().toISOString();
+        const path = `recommendedServices.${idx}`;
+        const updated = await AppointmentBooking.findByIdAndUpdate(
+            id,
+            {
+                $set: {
+                    [`${path}.status`]: "confirmed",
+                    [`${path}.confirmedAt`]: confirmedAt,
+                    [`${path}.confirmedBy`]: actorName,
+                },
+                $push: {
+                    activityLog: {
+                        at: confirmedAt,
+                        userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
+                        name: actorName,
+                        action: `Customer confirmed add-on: ${recs[idx].serviceName}`,
+                    },
+                },
+            },
+            { new: true },
+        ).exec();
+
+        return res.status(200).send({
+            success: true,
+            message: "Add-on confirmed for this visit",
+            data: updated,
+        });
+    } catch (error: any) {
+        return res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+export const updateAppointment = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const updateData = req.body;
+
+        const updated = await AppointmentBooking.findByIdAndUpdate(
+            id,
+            updateData,
+            { new: true },
+        ).exec();
+        if (!updated) {
+            return res.status(404).send({
+                success: false,
+                message: "Appointment not found",
+            });
+        }
+
+        // Auto-generate invoice when:
+        // - session marked completed, OR
+        // - online consultation slot is booked (see invoiceGeneration.ts)
+        const actor = {
+            name: (req.user as any)?.userfName
+                ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+                : undefined,
+            email: (req.user as any)?.userEmail,
+        };
+
+        await maybeCreateInvoiceForAppointment({
+            appointment: updated,
+            actor,
+        });
 
         return res.status(200).send({
             success: true,

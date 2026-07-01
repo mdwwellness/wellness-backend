@@ -1,5 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
 import mongoose from "mongoose";
@@ -9,9 +11,13 @@ import doctorRouter from "./routes/DoctorsRoute.ts";
 import analyticsRoute from "./routes/analyticsRoute.ts";
 import userRouter from "./routes/userRoute.ts";
 import serviceRouter from "./routes/serviceRoutes.ts";
+import customerRouter from "./routes/customerRoutes.ts";
+import invoiceRouter from "./routes/invoiceRoutes.ts";
 import { logger } from "./lib/logger.ts";
 
-dotenv.config();
+dotenv.config({
+  path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".env"),
+});
 
 const app = express();
 const allowedOrigins = [
@@ -90,6 +96,8 @@ app.use("/api/users", userRouter);
 app.use("/api/appointments", appointmentRouter);
 app.use("/api/therapist", doctorRouter);
 app.use("/api/services", serviceRouter);
+app.use("/api/customers", customerRouter);
+app.use("/api/invoices", invoiceRouter);
 app.get("/", (req, res) => {
   res.json({
     message: "Welcome to the MDW Wellness Backend",
