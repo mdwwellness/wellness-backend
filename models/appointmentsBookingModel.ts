@@ -41,6 +41,14 @@ const AppointmentBookingSchema = new Schema({
     packageServiceId: {
         type: String,
     },
+    // Which session in the package this visit is (1 = first visit after purchase).
+    sessionNumber: {
+        type: Number,
+    },
+    // Links follow-up session rows to the original enquiry / session 1 record.
+    packageOriginId: {
+        type: String,
+    },
     // ── Vitals Check sub-selections (e.g. "Blood Pressure (BP)", "Blood Sugar",
     //    "Other: ..."). Empty for non-vitals services. ──
     vitals: [{ type: String }],
