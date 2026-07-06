@@ -8,6 +8,17 @@ const lineItemSchema = new Schema(
   { _id: false },
 );
 
+const lockedAddonItemSchema = new Schema(
+  {
+    serviceId: { type: String, required: true },
+    recommendedAt: { type: String, required: true },
+    description: { type: String, required: true, trim: true },
+    price: { type: Number, required: true, min: 0 },
+    paymentCollected: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 const invoiceSchema = new Schema(
   {
     // Human-readable sequential ID (yearly reset): INV-2026-0001
@@ -60,6 +71,11 @@ const invoiceSchema = new Schema(
     therapist_name: { type: String, default: "" },
 
     line_items: { type: [lineItemSchema], default: [] },
+
+    // Add-ons committed to this invoice permanently at session completion, so
+    // clearing appointment.recommendedServices (per-visit scratch space) never
+    // erases already-billed add-ons from the ledger. See spec Addendum C1.
+    locked_addon_items: { type: [lockedAddonItemSchema], default: [] },
     items_subtotal: { type: Number, default: 0 },
     advance_paid: { type: Number, default: 0 },
     balance_due: { type: Number, default: 0 },

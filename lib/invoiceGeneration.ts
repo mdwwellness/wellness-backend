@@ -4,6 +4,8 @@ import Customer from "../models/customerModel.ts";
 import Invoice from "../models/invoiceModel.ts";
 import Service from "../models/serviceModel.ts";
 import { nextSequence, nextYearlySequence } from "./counters.ts";
+import { logger } from "./logger.ts";
+import { ensureInvoicePdfGeneratedAndUploaded } from "./invoicePdf.ts";
 
 type Actor = {
   name?: string;
@@ -82,6 +84,8 @@ function hasConsultationSlotBooked(appointment: any): boolean {
 
 /** When to auto-create an invoice for this appointment (idempotent). */
 export function shouldAutoGenerateInvoice(appointment: any): boolean {
+  if (appointment.paymentReceived && appointment.packageServiceId) return true;
+
   if (appointment.status === "completed") return true;
 
   if (!hasConsultationSlotBooked(appointment)) return false;
@@ -139,6 +143,117 @@ export async function maybeCreateInvoiceForAppointment(args: {
   return createInvoiceFromAppointment({ appointment, actor });
 }
 
+type MergedAddon = {
+  serviceId: string;
+  recommendedAt: string;
+  description: string;
+  price: number;
+  paymentCollected: boolean;
+};
+
+/**
+ * Union of an appointment's live confirmed add-ons and the invoice's locked
+ * (already-committed) add-ons, deduped by serviceId+recommendedAt. Live entries
+ * win (freshest paymentCollected / price). This is what lets a completed
+ * session's paid add-ons survive recommendedServices being cleared: after the
+ * clear, live is empty and the locked copies keep them on the invoice.
+ */
+function mergeAddonItems(
+  appointment: any,
+  lockedAddonItems?: any[],
+): MergedAddon[] {
+  const byKey = new Map<string, MergedAddon>();
+
+  for (const l of lockedAddonItems ?? []) {
+    if (!l?.serviceId) continue;
+    byKey.set(`${l.serviceId}|${l.recommendedAt}`, {
+      serviceId: l.serviceId,
+      recommendedAt: l.recommendedAt,
+      description: l.description,
+      price: safeNumber(l.price),
+      paymentCollected: !!l.paymentCollected,
+    });
+  }
+
+  for (const rec of appointment.recommendedServices ?? []) {
+    if (!rec?.serviceName) continue;
+    if (rec.status && rec.status !== "confirmed") continue;
+    byKey.set(`${rec.serviceId}|${rec.recommendedAt}`, {
+      serviceId: rec.serviceId,
+      recommendedAt: rec.recommendedAt,
+      description: `Add-on: ${rec.serviceName}`,
+      price: safeNumber(rec.quotedPrice),
+      paymentCollected: !!rec.paymentCollected,
+    });
+  }
+
+  return [...byKey.values()];
+}
+
+async function buildLineItemsFromAppointment(
+  appointment: any,
+  service?: any,
+  invoice_type?: InvoiceType,
+  lockedAddonItems?: any[],
+): Promise<{ description: string; price: number }[]> {
+  const type =
+    invoice_type ?? deriveInvoiceType(appointment, service);
+
+  const line_items: { description: string; price: number }[] = [];
+
+  if (type === "package_purchase" && service?.isPackage) {
+    const sessionNum = appointment.sessionNumber ?? 1;
+    const sessionsDone = appointment.sessionsCompleted ?? 0;
+    const isVisitInvoice = sessionsDone > 0 || sessionNum > 1;
+    if (isVisitInvoice) {
+      line_items.push({
+        description: `${service.name} — Session ${sessionNum} of ${service.packageCount ?? "?"}`,
+        price: 0,
+      });
+    } else {
+      const unitPrice =
+        (appointment.quotedPrice ?? null) != null
+          ? safeNumber(appointment.quotedPrice)
+          : (appointment.paymentAmount ?? null) != null
+            ? safeNumber(appointment.paymentAmount)
+            : service?.price != null
+              ? safeNumber(service.price)
+              : 0;
+      line_items.push({
+        description: service.name,
+        price: unitPrice,
+      });
+    }
+  } else {
+    const unitPrice =
+      (appointment.quotedPrice ?? null) != null
+        ? safeNumber(appointment.quotedPrice)
+        : (appointment.paymentAmount ?? null) != null
+          ? safeNumber(appointment.paymentAmount)
+          : service?.price != null
+            ? safeNumber(service.price)
+            : type === "online_consultation"
+              ? 500
+              : 0;
+
+    const lineItemDescription =
+      (appointment.service ?? "")?.toString() ||
+      service?.name ||
+      (type === "online_consultation" ? "Online Consultation" : "Therapy");
+
+    line_items.push({ description: lineItemDescription, price: unitPrice });
+  }
+
+  for (const addon of mergeAddonItems(appointment, lockedAddonItems)) {
+    line_items.push({
+      description: addon.description,
+      price: addon.price,
+    });
+  }
+
+  return line_items;
+}
+
 async function createInvoiceFromAppointment(args: {
   appointment: any;
   actor?: Actor;
@@ -168,39 +283,22 @@ async function createInvoiceFromAppointment(args: {
 
   const therapist_name = appointment.doctor ?? "";
 
-  const unitPrice =
-    (appointment.quotedPrice ?? null) != null
-      ? safeNumber(appointment.quotedPrice)
-      : (appointment.paymentAmount ?? null) != null
-        ? safeNumber(appointment.paymentAmount)
-        : service?.price != null
-          ? safeNumber(service.price)
-          : invoice_type === "online_consultation"
-            ? 500
-            : 0;
-
-  const lineItemDescription =
-    (appointment.service ?? "")?.toString() ||
-    service?.name ||
-    (invoice_type === "online_consultation" ? "Online Consultation" : "Therapy");
-
-  const line_items: { description: string; price: number }[] = [
-    { description: lineItemDescription, price: unitPrice },
-  ];
-
-  for (const rec of appointment.recommendedServices ?? []) {
-    if (!rec?.serviceName) continue;
-    if (rec.status && rec.status !== "confirmed") continue;
-    line_items.push({
-      description: `Add-on: ${rec.serviceName}`,
-      price: safeNumber(rec.quotedPrice),
-    });
-  }
+  const line_items = await buildLineItemsFromAppointment(
+    appointment,
+    service,
+    invoice_type,
+  );
 
   const items_subtotal = line_items.reduce((sum, li) => sum + safeNumber(li.price), 0);
   const total = items_subtotal;
 
-  const advance_paid = appointment.paymentReceived ? safeNumber(appointment.paymentAmount) : 0;
+  const packageAdvance = appointment.paymentReceived
+    ? safeNumber(appointment.paymentAmount)
+    : 0;
+  const addonPaid = mergeAddonItems(appointment)
+    .filter((a) => a.paymentCollected)
+    .reduce((s, a) => s + a.price, 0);
+  const advance_paid = packageAdvance + addonPaid;
   const balance_due = total - advance_paid;
 
   const payment_status: "paid" | "pending" =
@@ -229,7 +327,9 @@ async function createInvoiceFromAppointment(args: {
       package_type,
       package_ref,
       package_name,
-      session_number: null,
+      session_number: appointment.sessionNumber
+        ? String(appointment.sessionNumber)
+        : null,
       therapist_name,
       line_items,
       items_subtotal,
@@ -265,6 +365,150 @@ export async function createInvoiceIfMissingForAppointment(args: {
   if (!appointment) return null;
 
   return maybeCreateInvoiceForAppointment({ appointment, actor });
+}
+
+/** Update existing invoice line items when add-ons confirm or visit progresses. */
+export async function syncInvoiceFromAppointment(args: {
+  appointment: any;
+  actor?: Actor;
+}): Promise<InvoiceDoc | null> {
+  const { appointment, actor } = args;
+  if (!appointment?._id) return null;
+
+  const existing = await Invoice.findOne({
+    appointment_id: appointment._id,
+  }).exec();
+  if (!existing) {
+    return maybeCreateInvoiceForAppointment({ appointment, actor });
+  }
+
+  const service = appointment.packageServiceId
+    ? await Service.findOne({ serviceId: appointment.packageServiceId }).exec()
+    : appointment.service
+      ? await Service.findOne({ name: appointment.service }).exec()
+      : null;
+
+  const line_items = await buildLineItemsFromAppointment(
+    appointment,
+    service,
+    existing.invoice_type,
+    existing.locked_addon_items,
+  );
+  const items_subtotal = line_items.reduce(
+    (sum, li) => sum + safeNumber(li.price),
+    0,
+  );
+  const total = items_subtotal;
+  const packageAdvance = appointment.paymentReceived
+    ? safeNumber(appointment.paymentAmount)
+    : 0;
+  const addonPaid = mergeAddonItems(appointment, existing.locked_addon_items)
+    .filter((a) => a.paymentCollected)
+    .reduce((s, a) => s + a.price, 0);
+  const advance_paid = packageAdvance + addonPaid;
+  const balance_due = total - advance_paid;
+  const payment_status: "paid" | "pending" =
+    advance_paid > 0 && balance_due <= 0 ? "paid" : "pending";
+
+  const editor =
+    (actor?.name ?? "").trim() ||
+    (actor?.email ?? "").trim() ||
+    "system";
+
+  existing.line_items = line_items;
+  existing.items_subtotal = items_subtotal;
+  existing.total = total;
+  existing.advance_paid = advance_paid;
+  existing.balance_due = balance_due;
+  existing.payment_status = payment_status;
+  existing.session_number = appointment.sessionNumber
+    ? String(appointment.sessionNumber)
+    : existing.session_number;
+  existing.last_edited_by = editor;
+  existing.last_edited_at = new Date();
+  await existing.save();
+
+  try {
+    const pdf_url = await ensureInvoicePdfGeneratedAndUploaded(existing);
+    existing.pdf_url = pdf_url;
+    await existing.save();
+  } catch (err) {
+    logger.error(
+      `[invoice-pdf] regeneration failed for invoice ${existing.invoice_id}`,
+      err,
+    );
+  }
+
+  return existing;
+}
+
+/** Same as syncInvoiceFromAppointment, but never throws — logs and returns null on failure. */
+export async function safeSyncInvoiceFromAppointment(args: {
+  appointment: any;
+  actor?: Actor;
+}): Promise<InvoiceDoc | null> {
+  try {
+    return await syncInvoiceFromAppointment(args);
+  } catch (err) {
+    logger.error(
+      `[invoice-sync] failed for appointment ${args.appointment?._id}`,
+      err,
+    );
+    return null;
+  }
+}
+
+/**
+ * Snapshot an appointment's confirmed add-ons into its invoice as locked
+ * (permanent) line items, BEFORE the appointment's recommendedServices scratch
+ * space is cleared on session completion. Idempotent: dedupes by
+ * serviceId+recommendedAt, so a re-run (e.g. a lost completeSession race)
+ * never double-adds. Creates the invoice first if none exists yet.
+ */
+export async function lockConfirmedAddonsToInvoice(args: {
+  appointment: any;
+  actor?: Actor;
+}): Promise<void> {
+  const { appointment, actor } = args;
+  if (!appointment?._id) return;
+
+  const confirmed = (appointment.recommendedServices ?? []).filter(
+    (r: any) => r?.status === "confirmed" && r?.serviceName,
+  );
+  if (confirmed.length === 0) return;
+
+  let invoice = await Invoice.findOne({
+    appointment_id: appointment._id,
+  }).exec();
+  if (!invoice) {
+    // No invoice yet — create one from the appointment while it still carries
+    // the add-ons, so the invoice is fully formed before we lock.
+    invoice = await maybeCreateInvoiceForAppointment({ appointment, actor });
+    if (!invoice) return;
+  }
+
+  const existingKeys = new Set(
+    (invoice.locked_addon_items ?? []).map(
+      (l: any) => `${l.serviceId}|${l.recommendedAt}`,
+    ),
+  );
+
+  let added = false;
+  for (const rec of confirmed) {
+    const key = `${rec.serviceId}|${rec.recommendedAt}`;
+    if (existingKeys.has(key)) continue;
+    invoice.locked_addon_items.push({
+      serviceId: rec.serviceId,
+      recommendedAt: rec.recommendedAt,
+      description: `Add-on: ${rec.serviceName}`,
+      price: safeNumber(rec.quotedPrice),
+      paymentCollected: !!rec.paymentCollected,
+    });
+    existingKeys.add(key);
+    added = true;
+  }
+
+  if (added) await invoice.save();
 }
 
 export type ManualInvoiceInput = {

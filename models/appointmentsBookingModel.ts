@@ -45,6 +45,11 @@ const AppointmentBookingSchema = new Schema({
     sessionNumber: {
         type: Number,
     },
+    // Completed sessions in this package on this single appointment row.
+    sessionsCompleted: {
+        type: Number,
+        default: 0,
+    },
     // Links follow-up session rows to the original enquiry / session 1 record.
     packageOriginId: {
         type: String,
@@ -258,6 +263,8 @@ const AppointmentBookingSchema = new Schema({
             recommendedBy: { type: String },
             confirmedAt: { type: String },
             confirmedBy: { type: String },
+            paymentCollected: { type: Boolean, default: false },
+            paymentCollectedAt: { type: String },
             _id: false,
         },
     ],

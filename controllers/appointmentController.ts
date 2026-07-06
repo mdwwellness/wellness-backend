@@ -2,11 +2,14 @@ import express from "express";
 import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
+import Service from "../models/serviceModel.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { logger } from "../lib/logger.ts";
 import {
     ensureCustomerForAppointment,
+    lockConfirmedAddonsToInvoice,
     maybeCreateInvoiceForAppointment,
+    safeSyncInvoiceFromAppointment,
 } from "../lib/invoiceGeneration.ts";
 
 // Statuses considered "open" for public-form repeat folding (see addPublicEnquiry).
@@ -306,10 +309,208 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
             { new: true },
         ).exec();
 
+        const actor = {
+            name: actorName,
+            email: (req.user as any)?.userEmail,
+        };
+        if (updated) {
+            await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
+        }
+
         return res.status(200).send({
             success: true,
             message: "Add-on confirmed for this visit",
             data: updated,
+        });
+    } catch (error: any) {
+        return res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+export const setAddonPaymentStatus = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { serviceId, recommendedAt, collected } = req.body ?? {};
+
+        if (!serviceId || typeof serviceId !== "string") {
+            return res.status(400).send({
+                success: false,
+                message: "serviceId is required.",
+            });
+        }
+        if (!recommendedAt || typeof recommendedAt !== "string") {
+            return res.status(400).send({
+                success: false,
+                message: "recommendedAt is required.",
+            });
+        }
+        if (typeof collected !== "boolean") {
+            return res.status(400).send({
+                success: false,
+                message: "collected must be a boolean.",
+            });
+        }
+
+        const appointment = await AppointmentBooking.findById(id).exec();
+        if (!appointment) {
+            return res.status(404).send({
+                success: false,
+                message: "Appointment not found",
+            });
+        }
+
+        const recs = appointment.recommendedServices ?? [];
+        const idx = recs.findIndex(
+            (r) => r.serviceId === serviceId && r.recommendedAt === recommendedAt,
+        );
+        if (idx < 0) {
+            return res.status(404).send({
+                success: false,
+                message: "Recommendation not found on this visit.",
+            });
+        }
+
+        const actorName = (req.user as any)?.userfName
+            ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+            : (req.user as any)?.userEmail ?? "Staff";
+
+        const path = `recommendedServices.${idx}`;
+        const updated = await AppointmentBooking.findByIdAndUpdate(
+            id,
+            {
+                $set: {
+                    [`${path}.paymentCollected`]: collected,
+                    [`${path}.paymentCollectedAt`]: collected
+                        ? new Date().toISOString()
+                        : null,
+                },
+                $push: {
+                    activityLog: {
+                        at: new Date().toISOString(),
+                        userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
+                        name: actorName,
+                        action: `${collected ? "Marked" : "Unmarked"} add-on payment collected: ${recs[idx].serviceName}`,
+                    },
+                },
+            },
+            { new: true },
+        ).exec();
+
+        const actor = {
+            name: actorName,
+            email: (req.user as any)?.userEmail,
+        };
+        if (updated) {
+            await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
+        }
+
+        return res.status(200).send({
+            success: true,
+            message: "Add-on payment status updated",
+            data: updated,
+        });
+    } catch (error: any) {
+        return res.status(500).send({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+export const completeSession = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+
+        // Atomic increment — the server, not the client, decides the new count.
+        // Two near-simultaneous calls (double-click, two tabs) both apply their
+        // own +1 correctly instead of one overwriting the other's computed value.
+        const bumped = await AppointmentBooking.findByIdAndUpdate(
+            id,
+            { $inc: { sessionsCompleted: 1 } },
+            { new: true },
+        ).exec();
+        if (!bumped) {
+            return res.status(404).send({
+                success: false,
+                message: "Appointment not found",
+            });
+        }
+
+        // Same package-resolution pattern as lib/invoiceGeneration.ts:228-231.
+        const service = bumped.packageServiceId
+            ? await Service.findOne({ serviceId: bumped.packageServiceId }).exec()
+            : bumped.service
+                ? await Service.findOne({ name: bumped.service }).exec()
+                : null;
+        const total = service?.packageCount ?? 1;
+        const sessionsDone = bumped.sessionsCompleted ?? 0;
+        const done = sessionsDone >= total;
+
+        const actorName = (req.user as any)?.userfName
+            ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+            : (req.user as any)?.userEmail ?? "Therapist";
+
+        const logEntry = {
+            at: new Date().toISOString(),
+            userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
+            name: actorName,
+            action: done
+                ? `Package complete — all ${total} sessions done`
+                : `Session ${sessionsDone} of ${total} completed — schedule next visit`,
+        };
+
+        const actor = {
+            name: actorName,
+            email: (req.user as any)?.userEmail,
+        };
+
+        // Persist confirmed add-ons to the invoice ledger BEFORE clearing the
+        // per-visit scratch space, so completing a session never erases a paid
+        // add-on's billing. Uses `bumped`, which still carries recommendedServices.
+        // Wrapped like sync: a lock failure must not fail the completion.
+        try {
+            await lockConfirmedAddonsToInvoice({ appointment: bumped, actor });
+        } catch (err) {
+            console.error(`[addon-lock] failed for appointment ${id}:`, err);
+        }
+
+        // Conditioned on the exact sessionsCompleted value this request just
+        // observed: if a concurrent completion has since moved the counter
+        // further, this write is a no-op (findOneAndUpdate returns null)
+        // instead of blindly overwriting status/completedAt with a now-stale
+        // decision. Whichever request's snapshot matches the CURRENT true
+        // count at write time is always the most recent completion, so its
+        // status write is always the correct final one.
+        let finalUpdate = await AppointmentBooking.findOneAndUpdate(
+            { _id: id, sessionsCompleted: sessionsDone },
+            {
+                status: done ? "completed" : "scheduled",
+                ...(done ? { completedAt: new Date() } : { sessionNumber: sessionsDone + 1 }),
+                recommendedServices: [],
+                workChecklist: [],
+                $push: { activityLog: logEntry },
+            },
+            { new: true },
+        ).exec();
+
+        if (!finalUpdate) {
+            // Lost the race: another concurrent completion already advanced
+            // sessionsCompleted past what this request saw, and that other
+            // request's own status write already reflects the true final state.
+            finalUpdate = await AppointmentBooking.findById(id).exec();
+        }
+
+        if (finalUpdate) {
+            await safeSyncInvoiceFromAppointment({ appointment: finalUpdate, actor });
+        }
+
+        return res.status(200).send({
+            success: true,
+            message: done ? "Package complete" : `Session ${sessionsDone} of ${total} completed`,
+            data: finalUpdate,
         });
     } catch (error: any) {
         return res.status(500).send({
@@ -346,7 +547,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
             email: (req.user as any)?.userEmail,
         };
 
-        await maybeCreateInvoiceForAppointment({
+        await safeSyncInvoiceFromAppointment({
             appointment: updated,
             actor,
         });
