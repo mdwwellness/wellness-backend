@@ -90,16 +90,27 @@ export async function updateInvoice(req: Request, res: Response) {
     }
 
     if (Array.isArray(patch.line_items)) {
-      invoice.line_items = patch.line_items
+      const nextLineItems = patch.line_items
         .filter((li: any) => li && typeof li.description === "string" && Number.isFinite(li.price))
         .map((li: any) => ({ description: li.description.trim(), price: Number(li.price) }));
+
+      if (nextLineItems.length === 0) {
+        return res.status(400).send({ success: false, message: "An invoice needs at least one line item." });
+      }
+      if (nextLineItems.some((li: any) => li.price < 0)) {
+        return res.status(400).send({ success: false, message: "Line item prices cannot be negative." });
+      }
+
+      invoice.line_items = nextLineItems;
     }
 
     // Recompute totals from line items; preserve advance_paid.
     const itemsSubtotal = invoice.line_items.reduce((sum: number, li: any) => sum + (li.price ?? 0), 0);
     invoice.items_subtotal = itemsSubtotal;
     invoice.total = itemsSubtotal;
-    invoice.balance_due = invoice.total - (invoice.advance_paid ?? 0);
+    // Never show a negative balance — an overpayment/prepaid package reads as
+    // "paid in full", not a negative number.
+    invoice.balance_due = Math.max(0, invoice.total - (invoice.advance_paid ?? 0));
 
     // Invalidate PDF after edits.
     invoice.pdf_url = null;
@@ -108,6 +119,38 @@ export async function updateInvoice(req: Request, res: Response) {
 
     await invoice.save();
     return res.status(200).send({ success: true, message: "Invoice updated", data: invoice });
+  } catch (err: any) {
+    return res.status(500).send({ success: false, message: err.message });
+  }
+}
+
+// Soft-void an invoice: keep the record for the audit trail but mark it voided
+// so it's clearly cancelled and excluded from live totals.
+export async function voidInvoice(req: Request, res: Response) {
+  try {
+    const role = (req.user as any)?.role as string | undefined;
+    if (role && !BACK_OFFICE_ROLES.has(role)) {
+      return res.status(403).send({ success: false, message: "Forbidden" });
+    }
+
+    const { invoiceId } = req.params;
+    const reason = String(req.body?.reason ?? "").trim();
+
+    const invoice = await Invoice.findOne({ invoice_id: invoiceId }).exec();
+    if (!invoice) {
+      return res.status(404).send({ success: false, message: "Invoice not found" });
+    }
+    if (invoice.voided) {
+      return res.status(400).send({ success: false, message: "Invoice is already voided." });
+    }
+
+    invoice.voided = true;
+    invoice.voided_at = new Date();
+    invoice.voided_by = actorName(req);
+    invoice.void_reason = reason;
+    await invoice.save();
+
+    return res.status(200).send({ success: true, message: "Invoice voided", data: invoice });
   } catch (err: any) {
     return res.status(500).send({ success: false, message: err.message });
   }

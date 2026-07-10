@@ -69,6 +69,9 @@ const invoiceSchema = new Schema(
     session_number: { type: String, default: null },
 
     therapist_name: { type: String, default: "" },
+    therapist_id: { type: String, default: "" },
+    // Service address (home-visit location), snapshotted from the appointment.
+    address: { type: String, default: "" },
 
     line_items: { type: [lineItemSchema], default: [] },
 
@@ -89,6 +92,13 @@ const invoiceSchema = new Schema(
     },
 
     pdf_url: { type: String, default: null },
+
+    // Soft-void: a wrong invoice is marked voided (kept for the audit trail,
+    // excluded from live totals) rather than hard-deleted.
+    voided: { type: Boolean, default: false },
+    voided_at: { type: Date, default: null },
+    voided_by: { type: String, default: null },
+    void_reason: { type: String, default: "" },
 
     created_by: { type: String, default: "system" },
     last_edited_by: { type: String, default: null },

@@ -6,6 +6,7 @@ import {
   getInvoice,
   getInvoices,
   updateInvoice,
+  voidInvoice,
 } from "../controllers/invoiceController.ts";
 
 const invoiceRouter = express.Router();
@@ -15,6 +16,7 @@ invoiceRouter.post("/", userAuth, createInvoice);
 invoiceRouter.get("/:invoiceId", userAuth, getInvoice);
 invoiceRouter.patch("/:invoiceId", userAuth, updateInvoice);
 invoiceRouter.post("/:invoiceId/pdf", userAuth, generateInvoicePdf);
+invoiceRouter.post("/:invoiceId/void", userAuth, voidInvoice);
 
 export default invoiceRouter;
 

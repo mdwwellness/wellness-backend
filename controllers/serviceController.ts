@@ -1,7 +1,16 @@
 import type { Request, Response } from "express";
 import Service from "../models/serviceModel.ts";
+import AppointmentBooking from "../models/appointmentsBookingModel.ts";
+import Invoice from "../models/invoiceModel.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { logger } from "../lib/logger.ts";
+
+function packageFieldsInvalid(body: any): boolean {
+    if (!body?.isPackage) return false;
+    const count = body.packageCount;
+    const unit = body.packageUnit;
+    return count === undefined || count === null || Number(count) < 1 || !unit;
+}
 
 export const addService = async (req: Request, res: Response) => {
     try {
@@ -10,6 +19,13 @@ export const addService = async (req: Request, res: Response) => {
             return res.status(400).send({
                 success: false,
                 message: "Name, price and category are required.",
+            });
+        }
+
+        if (packageFieldsInvalid(req.body)) {
+            return res.status(400).send({
+                success: false,
+                message: "A package needs at least 1 session and a unit (sessions/weeks/months).",
             });
         }
 
@@ -45,6 +61,14 @@ export const updateService = async (req: Request, res: Response) => {
         const { serviceId } = req.params;
         // serviceId is immutable — never let the body overwrite it.
         const { serviceId: _ignore, ...updateData } = req.body;
+
+        if (packageFieldsInvalid(updateData)) {
+            return res.status(400).send({
+                success: false,
+                message: "A package needs at least 1 session and a unit (sessions/weeks/months).",
+            });
+        }
+
         const updated = await Service.findOneAndUpdate(
             { serviceId },
             updateData,
@@ -66,6 +90,29 @@ export const updateService = async (req: Request, res: Response) => {
 export const deleteService = async (req: Request, res: Response) => {
     try {
         const { serviceId } = req.params;
+
+        const [appointmentCount, invoiceCount] = await Promise.all([
+            AppointmentBooking.countDocuments({
+                $or: [
+                    { packageServiceId: serviceId },
+                    { "recommendedServices.serviceId": serviceId },
+                ],
+            }),
+            Invoice.countDocuments({
+                $or: [
+                    { package_ref: serviceId },
+                    { "locked_addon_items.serviceId": serviceId },
+                ],
+            }),
+        ]);
+        const totalCount = appointmentCount + invoiceCount;
+        if (totalCount > 0) {
+            return res.status(409).send({
+                success: false,
+                message: `Cannot delete — this service is used by ${totalCount} appointment(s)/invoice(s).`,
+            });
+        }
+
         const deleted = await Service.findOneAndDelete({ serviceId });
         if (!deleted) {
             return res

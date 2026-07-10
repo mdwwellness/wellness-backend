@@ -169,10 +169,29 @@ export async function deleteDoctor(req: Request, res: Response) {
   try {
     const { id } = req.params;
 
+    const appointmentCount = await AppointmentBookingModel.countDocuments({
+      doctorId: id,
+    });
+    if (appointmentCount > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot delete — this therapist has ${appointmentCount} appointment(s).`,
+      });
+    }
+
     const deletedDoctor = await Doctor.findOneAndDelete({ doctorId: id });
 
     if (!deletedDoctor) {
       return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    // Deactivate the linked login account so the removed therapist can no
+    // longer sign in (userAuth blocks inactive users). Deactivated rather than
+    // hard-deleted so any audit references stay intact.
+    if (deletedDoctor.userId) {
+      await User.findByIdAndUpdate(deletedDoctor.userId, {
+        isActive: false,
+      }).catch(() => {});
     }
 
     return res.json({ message: "Doctor deleted successfully" });

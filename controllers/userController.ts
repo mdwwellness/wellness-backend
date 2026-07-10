@@ -147,6 +147,15 @@ export const adminRegisterUser = async (req: Request, res: Response) => {
         message: "Role is required for admin user creation",
       });
     }
+    if (
+      !userPassword ||
+      typeof userPassword !== "string" ||
+      userPassword.length < 6
+    ) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters.",
+      });
+    }
     const existingUserEmail = await User.findOne({ userEmail });
     const existingUserPhone = await User.findOne({ userPhone });
     if (existingUserEmail || existingUserPhone) {
@@ -161,10 +170,14 @@ export const adminRegisterUser = async (req: Request, res: Response) => {
       "STAFF",
       "CUSTOMER_CARE",
     ];
-    const userRole =
-      role && validRoles.includes(role.toUpperCase())
-        ? role.toUpperCase()
-        : "CUSTOMER";
+    // Reject an unknown role instead of silently coercing it to a non-enum
+    // value ("CUSTOMER"), which would otherwise throw a raw 500 on save.
+    if (!validRoles.includes(String(role).toUpperCase())) {
+      return res.status(400).json({
+        message: `Invalid role. Must be one of: ${validRoles.join(", ")}.`,
+      });
+    }
+    const userRole = String(role).toUpperCase();
 
     const newUser = new User({
       userfName,
@@ -415,6 +428,35 @@ export const deleteUser = async (req:Request, res:Response) => {
     const { userId } = req.body;
     if (!userId) {
       return res.status(400).json({ message: "User ID required" });
+    }
+
+    // Can't delete yourself — an admin locking themselves out mid-action.
+    const requesterId = String(
+      (req.user as any)?._id ?? (req.user as any)?.id ?? "",
+    );
+    if (requesterId && requesterId === String(userId)) {
+      return res
+        .status(400)
+        .json({ message: "You cannot delete your own account." });
+    }
+
+    const target = await User.findById(userId);
+    if (!target) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Don't allow deleting the last remaining admin — that would orphan the
+    // system with no one able to manage users.
+    if (target.role === "SUPER_ADMIN" || target.role === "ADMIN") {
+      const adminCount = await User.countDocuments({
+        role: { $in: ["SUPER_ADMIN", "ADMIN"] },
+        isActive: true,
+      });
+      if (adminCount <= 1) {
+        return res
+          .status(400)
+          .json({ message: "Cannot delete the last admin account." });
+      }
     }
 
     const deletedUser = await User.findByIdAndDelete(userId);

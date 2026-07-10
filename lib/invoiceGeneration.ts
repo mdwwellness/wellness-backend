@@ -52,21 +52,37 @@ export async function ensureCustomerForAppointment(
   const address = (appointment.location ?? "").toString(); // location used as address context in MVP
 
   // Prefer stable identity by phone.
-  const existing = await Customer.findOne({ phone }).exec();
-  if (existing) return existing;
+  let customer = await Customer.findOne({ phone }).exec();
+  if (!customer) {
+    const seq = await nextSequence("customer");
+    const customer_id = formatCustomerId(seq);
+    customer = new Customer({
+      customer_id,
+      name: name || "Unknown customer",
+      phone,
+      email,
+      address,
+    });
+    await customer.save();
+  }
 
-  const seq = await nextSequence("customer");
-  const customer_id = formatCustomerId(seq);
+  // Backfill the customer ID onto the appointment doc so every appointment
+  // carries its own customer_id (visible in the dashboard without a phone join).
+  // Only when passed a live document — manual invoices pass plain objects.
+  try {
+    if (
+      appointment &&
+      typeof appointment.save === "function" &&
+      appointment.customer_id !== customer.customer_id
+    ) {
+      appointment.customer_id = customer.customer_id;
+      await appointment.save();
+    }
+  } catch {
+    // Non-fatal: the customer still exists; the appointment just lacks the id.
+  }
 
-  const created = new Customer({
-    customer_id,
-    name: name || "Unknown customer",
-    phone,
-    email,
-    address,
-  });
-  await created.save();
-  return created;
+  return customer;
 }
 
 function hasConsultationSlotBooked(appointment: any): boolean {
@@ -112,7 +128,19 @@ function deriveInvoiceType(
     return "therapy_session";
   }
 
-  // Online consultation booked / consultation-only
+  if (appointment.appointmentKind === "recommended") {
+    return "therapy_addon_standalone";
+  }
+
+  // A therapy PACKAGE that's been chosen/paid is package billing — even if an
+  // online consultation happened earlier in the funnel. This must be checked
+  // BEFORE the consultation signals, otherwise a Home-Therapy package whose
+  // lead had a consultation gets mislabelled "online_consultation".
+  if (service?.isPackage || appointment.packageServiceId) {
+    return "package_purchase";
+  }
+
+  // Consultation-only lead → consultation fee.
   if (
     appointment.typeOfappointment === "consultation" ||
     appointment.consultationCompleted ||
@@ -121,11 +149,6 @@ function deriveInvoiceType(
     return "online_consultation";
   }
 
-  if (appointment.appointmentKind === "recommended") {
-    return "therapy_addon_standalone";
-  }
-
-  if (service?.isPackage) return "package_purchase";
   return "therapy_session";
 }
 
@@ -190,41 +213,69 @@ function mergeAddonItems(
   return [...byKey.values()];
 }
 
+// Flat fee for an online consultation when the catalogue price isn't available.
+const CONSULT_FEE = 500;
+
+/**
+ * Whether this appointment consumed a billable ONLINE CONSULTATION — a paid
+ * session where the customer talks to a therapist about their issue.
+ *
+ * NOT the same as the executive reach-out (a free scheduling call), and NOT the
+ * free intake/"consultation call" a Home Therapy / Vitals lead has — those are
+ * never charged. Only genuine "Online Consultation" leads pay the ₹500.
+ */
+function hasConsultationCharge(appointment: any): boolean {
+  if (
+    appointment.service === "Home Therapy" ||
+    appointment.service === "Vitals Check"
+  ) {
+    return false;
+  }
+  return (
+    appointment.service === "Online Consultation" ||
+    appointment.typeOfappointment === "consultation"
+  );
+}
+
+/**
+ * Itemised breakdown of everything the customer consumed on this appointment:
+ *   1. Online consultation (if they had one)
+ *   2. The therapy package (charged once) OR a standalone therapy service
+ *   3. Each confirmed add-on
+ * There is one invoice per appointment (updated in place), so the package is
+ * charged a single time regardless of how many sessions have been completed.
+ */
 async function buildLineItemsFromAppointment(
   appointment: any,
   service?: any,
-  invoice_type?: InvoiceType,
+  _invoice_type?: InvoiceType,
   lockedAddonItems?: any[],
 ): Promise<{ description: string; price: number }[]> {
-  const type =
-    invoice_type ?? deriveInvoiceType(appointment, service);
-
   const line_items: { description: string; price: number }[] = [];
 
-  if (type === "package_purchase" && service?.isPackage) {
-    const sessionNum = appointment.sessionNumber ?? 1;
-    const sessionsDone = appointment.sessionsCompleted ?? 0;
-    const isVisitInvoice = sessionsDone > 0 || sessionNum > 1;
-    if (isVisitInvoice) {
-      line_items.push({
-        description: `${service.name} — Session ${sessionNum} of ${service.packageCount ?? "?"}`,
-        price: 0,
-      });
-    } else {
-      const unitPrice =
-        (appointment.quotedPrice ?? null) != null
-          ? safeNumber(appointment.quotedPrice)
-          : (appointment.paymentAmount ?? null) != null
-            ? safeNumber(appointment.paymentAmount)
-            : service?.price != null
-              ? safeNumber(service.price)
-              : 0;
-      line_items.push({
-        description: service.name,
-        price: unitPrice,
-      });
-    }
-  } else {
+  // 1. Online consultation fee.
+  if (hasConsultationCharge(appointment)) {
+    line_items.push({
+      description: "Online Consultation",
+      price: CONSULT_FEE,
+    });
+  }
+
+  // 2. Package, or a standalone therapy service.
+  if (service?.isPackage) {
+    const pkgPrice =
+      (appointment.quotedPrice ?? null) != null
+        ? safeNumber(appointment.quotedPrice)
+        : (appointment.paymentAmount ?? null) != null
+          ? safeNumber(appointment.paymentAmount)
+          : service?.price != null
+            ? safeNumber(service.price)
+            : 0;
+    line_items.push({
+      description: `${service.name} (${service.packageCount ?? "?"} sessions)`,
+      price: pkgPrice,
+    });
+  } else if (!hasConsultationCharge(appointment)) {
     const unitPrice =
       (appointment.quotedPrice ?? null) != null
         ? safeNumber(appointment.quotedPrice)
@@ -232,18 +283,15 @@ async function buildLineItemsFromAppointment(
           ? safeNumber(appointment.paymentAmount)
           : service?.price != null
             ? safeNumber(service.price)
-            : type === "online_consultation"
-              ? 500
-              : 0;
-
-    const lineItemDescription =
-      (appointment.service ?? "")?.toString() ||
-      service?.name ||
-      (type === "online_consultation" ? "Online Consultation" : "Therapy");
-
-    line_items.push({ description: lineItemDescription, price: unitPrice });
+            : 0;
+    line_items.push({
+      description:
+        (appointment.service ?? "")?.toString() || service?.name || "Therapy",
+      price: unitPrice,
+    });
   }
 
+  // 3. Add-ons (confirmed live + locked-on-invoice, deduped).
   for (const addon of mergeAddonItems(appointment, lockedAddonItems)) {
     line_items.push({
       description: addon.description,
@@ -298,8 +346,12 @@ async function createInvoiceFromAppointment(args: {
   const addonPaid = mergeAddonItems(appointment)
     .filter((a) => a.paymentCollected)
     .reduce((s, a) => s + a.price, 0);
-  const advance_paid = packageAdvance + addonPaid;
-  const balance_due = total - advance_paid;
+  const consultPaid =
+    hasConsultationCharge(appointment) && appointment.consultationCompleted
+      ? CONSULT_FEE
+      : 0;
+  const advance_paid = packageAdvance + addonPaid + consultPaid;
+  const balance_due = Math.max(0, total - advance_paid);
 
   const payment_status: "paid" | "pending" =
     advance_paid > 0 && balance_due <= 0 ? "paid" : "pending";
@@ -331,6 +383,8 @@ async function createInvoiceFromAppointment(args: {
         ? String(appointment.sessionNumber)
         : null,
       therapist_name,
+      therapist_id: appointment.doctorId ?? "",
+      address: (appointment.location ?? "").toString(),
       line_items,
       items_subtotal,
       advance_paid,
@@ -382,16 +436,25 @@ export async function syncInvoiceFromAppointment(args: {
     return maybeCreateInvoiceForAppointment({ appointment, actor });
   }
 
+  // Backfill customer_id onto the appointment on the update path too — the
+  // create path already does this via maybeCreate. Idempotent (keyed by phone).
+  await ensureCustomerForAppointment(appointment);
+
   const service = appointment.packageServiceId
     ? await Service.findOne({ serviceId: appointment.packageServiceId }).exec()
     : appointment.service
       ? await Service.findOne({ name: appointment.service }).exec()
       : null;
 
+  // Re-derive the invoice type from the CURRENT appointment state so a lead
+  // first invoiced at the consultation step gets corrected to package billing
+  // once a therapy package is chosen/paid (fixes "online_consultation" showing
+  // on a Home-Therapy package).
+  const invoice_type = deriveInvoiceType(appointment, service);
   const line_items = await buildLineItemsFromAppointment(
     appointment,
     service,
-    existing.invoice_type,
+    invoice_type,
     existing.locked_addon_items,
   );
   const items_subtotal = line_items.reduce(
@@ -405,8 +468,12 @@ export async function syncInvoiceFromAppointment(args: {
   const addonPaid = mergeAddonItems(appointment, existing.locked_addon_items)
     .filter((a) => a.paymentCollected)
     .reduce((s, a) => s + a.price, 0);
-  const advance_paid = packageAdvance + addonPaid;
-  const balance_due = total - advance_paid;
+  const consultPaid =
+    hasConsultationCharge(appointment) && appointment.consultationCompleted
+      ? CONSULT_FEE
+      : 0;
+  const advance_paid = packageAdvance + addonPaid + consultPaid;
+  const balance_due = Math.max(0, total - advance_paid);
   const payment_status: "paid" | "pending" =
     advance_paid > 0 && balance_due <= 0 ? "paid" : "pending";
 
@@ -415,12 +482,20 @@ export async function syncInvoiceFromAppointment(args: {
     (actor?.email ?? "").trim() ||
     "system";
 
+  existing.invoice_type = invoice_type;
   existing.line_items = line_items;
   existing.items_subtotal = items_subtotal;
   existing.total = total;
   existing.advance_paid = advance_paid;
   existing.balance_due = balance_due;
   existing.payment_status = payment_status;
+  // Backfill the therapist from the appointment — an invoice created before the
+  // physio was assigned would otherwise never show one.
+  existing.therapist_name = appointment.doctor || existing.therapist_name;
+  (existing as any).therapist_id =
+    appointment.doctorId || (existing as any).therapist_id || "";
+  (existing as any).address =
+    appointment.location || (existing as any).address || "";
   existing.session_number = appointment.sessionNumber
     ? String(appointment.sessionNumber)
     : existing.session_number;
@@ -535,12 +610,14 @@ export async function createManualInvoice(
   let customer_id = input.customer_id ?? "";
   let customer_name = (input.customer_name ?? "").trim();
   let customer_phone = input.customer_phone ?? 0;
+  let address = "";
 
   if (customer_id) {
     const customer = await Customer.findOne({ customer_id }).exec();
     if (!customer) throw new Error("Customer not found");
     customer_name = customer.name;
     customer_phone = customer.phone;
+    address = (customer as any).address ?? "";
   } else {
     if (!customer_name || customer_name.length < 2) {
       throw new Error("Customer name is required (min 2 chars).");
@@ -557,6 +634,7 @@ export async function createManualInvoice(
     customer_id = customer.customer_id;
     customer_name = customer.name;
     customer_phone = customer.phone;
+    address = (customer as any).address ?? "";
   }
 
   if (input.appointment_id) {
@@ -580,10 +658,14 @@ export async function createManualInvoice(
     throw new Error("At least one line item is required.");
   }
 
+  if (line_items.some((li) => li.price < 0)) {
+    throw new Error("Line item prices cannot be negative.");
+  }
+
   const items_subtotal = line_items.reduce((s, li) => s + li.price, 0);
   const total = items_subtotal;
   const advance_paid = Number(input.advance_paid) || 0;
-  const balance_due = total - advance_paid;
+  const balance_due = Math.max(0, total - advance_paid);
   const payment_status: "paid" | "pending" =
     input.payment_status ??
     (advance_paid > 0 && balance_due <= 0 ? "paid" : "pending");
@@ -605,6 +687,7 @@ export async function createManualInvoice(
     package_name: input.package_name ?? "",
     session_number: input.session_number ?? null,
     therapist_name: input.therapist_name ?? "",
+    address,
     line_items,
     items_subtotal,
     advance_paid,

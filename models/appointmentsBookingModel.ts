@@ -139,6 +139,13 @@ const AppointmentBookingSchema = new Schema({
         index: true,
     },
 
+    // ── Linked customer (CUST-####). Backfilled by ensureCustomer so every
+    //    appointment carries its customer ID directly (no phone join needed). ──
+    customer_id: {
+        type: String,
+        index: true,
+    },
+
     // ── Which back-office staff member is handling this lead.
     //    Auto-populated when an executive first ticks "Mark as reached out".
     //    Editable via dropdown in the dashboard drawer. ──

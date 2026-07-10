@@ -11,6 +11,7 @@ import {
     maybeCreateInvoiceForAppointment,
     safeSyncInvoiceFromAppointment,
 } from "../lib/invoiceGeneration.ts";
+import { createBooking } from "../lib/bookingService.ts";
 
 // Statuses considered "open" for public-form repeat folding (see addPublicEnquiry).
 const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
@@ -26,46 +27,39 @@ const BACK_OFFICE_ROLES = new Set([
 ]);
 
 export const addAppointmentsDetails = async (req: Request, res: Response) => {
-    const details = req.body;
-    const { name, phonenumber } = details;
+    try {
+        const actor = {
+            name: (req.user as any)?.userfName
+                ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+                : undefined,
+            email: (req.user as any)?.userEmail,
+        };
 
-    // Only name and phonenumber are required at the wire level.
-    // The rest of the fields are populated as the lead progresses through
-    // the funnel (enquiry → consultation booked → physio assignment).
-    if (!name || !phonenumber) {
-        return res.status(400).send({
+        // All creation logic — validation, ID allocation, customer linkage, and
+        // invoice generation — lives in the one createBooking() service, so this
+        // dashboard path and the public path can never drift apart again.
+        const result = await createBooking(req.body, {
+            source: "dashboard",
+            actor,
+        });
+
+        if (!result.ok) {
+            return res
+                .status(result.code)
+                .send({ success: false, message: result.message });
+        }
+
+        return res.status(200).send({
+            success: true,
+            message: "Appointment booked",
+            data: result.appointment,
+        });
+    } catch (error: any) {
+        return res.status(500).send({
             success: false,
-            message: "Name and phone number are required.",
+            message: error.message,
         });
     }
-
-    // Same phone may log multiple enquiries — each gets its own ENQ-#### row.
-
-    // Allocate the next sequential enquiry ID (ENQ-0001, ENQ-0002, ...).
-    // 4-digit zero-padded; expands naturally to 5 digits at 10000.
-    const seq = await nextSequence("enquiry");
-    const enquiryId = `ENQ-${String(seq).padStart(4, "0")}`;
-    details.enquiryId = enquiryId;
-
-    const result = new AppointmentBooking(details);
-    await result.save();
-    logger.info("Enquiry created (dashboard)", { enquiryId, phonenumber });
-
-    await ensureCustomerForAppointment(result);
-
-    const actor = {
-        name: (req.user as any)?.userfName
-            ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
-            : undefined,
-        email: (req.user as any)?.userEmail,
-    };
-    await maybeCreateInvoiceForAppointment({ appointment: result, actor });
-
-    return res.status(200).send({
-        success: true,
-        message: "Appointment booked",
-        data: result,
-    });
 };
 
 
@@ -424,15 +418,9 @@ export const completeSession = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
 
-        // Atomic increment — the server, not the client, decides the new count.
-        // Two near-simultaneous calls (double-click, two tabs) both apply their
-        // own +1 correctly instead of one overwriting the other's computed value.
-        const bumped = await AppointmentBooking.findByIdAndUpdate(
-            id,
-            { $inc: { sessionsCompleted: 1 } },
-            { new: true },
-        ).exec();
-        if (!bumped) {
+        // Look up the row first so we know the package total BEFORE incrementing.
+        const existing = await AppointmentBooking.findById(id).exec();
+        if (!existing) {
             return res.status(404).send({
                 success: false,
                 message: "Appointment not found",
@@ -440,12 +428,35 @@ export const completeSession = async (req: Request, res: Response) => {
         }
 
         // Same package-resolution pattern as lib/invoiceGeneration.ts:228-231.
-        const service = bumped.packageServiceId
-            ? await Service.findOne({ serviceId: bumped.packageServiceId }).exec()
-            : bumped.service
-                ? await Service.findOne({ name: bumped.service }).exec()
+        const service = existing.packageServiceId
+            ? await Service.findOne({ serviceId: existing.packageServiceId }).exec()
+            : existing.service
+                ? await Service.findOne({ name: existing.service }).exec()
                 : null;
         const total = service?.packageCount ?? 1;
+
+        // Ceiling guard: never complete past the package total. Atomic conditional
+        // increment — only bumps when the current count (0 if the field is missing)
+        // is still below `total`; returns null if the package is already complete.
+        // This enforces the ceiling AND stays correct under concurrent completions
+        // (the server, not the client, decides the count).
+        const bumped = await AppointmentBooking.findOneAndUpdate(
+            {
+                _id: id,
+                $expr: { $lt: [{ $ifNull: ["$sessionsCompleted", 0] }, total] },
+            },
+            { $inc: { sessionsCompleted: 1 } },
+            { new: true },
+        ).exec();
+        if (!bumped) {
+            // Already at/over the total — there is no session left to complete.
+            return res.status(409).send({
+                success: false,
+                message: `Package already complete — all ${total} sessions done`,
+                data: existing,
+            });
+        }
+
         const sessionsDone = bumped.sessionsCompleted ?? 0;
         const done = sessionsDone >= total;
 
@@ -467,10 +478,10 @@ export const completeSession = async (req: Request, res: Response) => {
             email: (req.user as any)?.userEmail,
         };
 
-        // Persist confirmed add-ons to the invoice ledger BEFORE clearing the
-        // per-visit scratch space, so completing a session never erases a paid
-        // add-on's billing. Uses `bumped`, which still carries recommendedServices.
-        // Wrapped like sync: a lock failure must not fail the completion.
+        // Snapshot confirmed add-ons onto the invoice ledger — belt-and-suspenders:
+        // add-ons now stay on the row too, but this guarantees the invoice keeps
+        // them even if the row is later edited. A lock failure must not fail the
+        // completion.
         try {
             await lockConfirmedAddonsToInvoice({ appointment: bumped, actor });
         } catch (err) {
@@ -489,7 +500,9 @@ export const completeSession = async (req: Request, res: Response) => {
             {
                 status: done ? "completed" : "scheduled",
                 ...(done ? { completedAt: new Date() } : { sessionNumber: sessionsDone + 1 }),
-                recommendedServices: [],
+                // Add-ons are NOT cleared — they stay on the row (shown with a
+                // check once confirmed) so they never vanish. Only the per-visit
+                // checklist (arrived/performed/completed) resets for next visit.
                 workChecklist: [],
                 $push: { activityLog: logEntry },
             },
@@ -609,69 +622,8 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             vitals,
         } = req.body;
 
-        if (!name || typeof name !== "string" || name.trim().length < 2) {
-            return res.status(400).send({
-                success: false,
-                message: "Name is required (at least 2 characters).",
-            });
-        }
-        if (!phonenumber || typeof phonenumber !== "number") {
-            return res.status(400).send({
-                success: false,
-                message: "Phone number is required (numeric).",
-            });
-        }
-
-        // Repeat-submission handling. If this number already has an OPEN lead,
-        // we DON'T create a duplicate row. Instead we fold the repeat into the
-        // existing lead: bump its repeatCount and append the new submission to
-        // its activity log so staff can see any corrected details (they
-        // reconcile the lead's fields manually).
-        const existing = await AppointmentBooking.findOne({
-            phonenumber,
-            status: { $in: OPEN_STATUSES },
-        });
-        if (existing) {
-            const repeatNumber = (existing.repeatCount ?? 1) + 1;
-
-            const detailBits: string[] = [];
-            if (typeOfappointment) detailBits.push(`type: ${typeOfappointment}`);
-            if (location) detailBits.push(`location: ${location}`);
-            if (preferredReachOutTime?.from || preferredReachOutTime?.to) {
-                detailBits.push(
-                    `time: ${preferredReachOutTime?.from ?? "?"}–${preferredReachOutTime?.to ?? "?"}`,
-                );
-            }
-            if (note) detailBits.push(`note: ${note}`);
-            const action = `Re-submitted via public form (#${repeatNumber})${
-                detailBits.length ? " — " + detailBits.join(", ") : ""
-            }`;
-
-            existing.repeatCount = repeatNumber;
-            existing.activityLog.push({
-                at: new Date().toISOString(),
-                name: name.trim(),
-                action,
-            });
-            await existing.save();
-            logger.info("Public booking repeat folded into existing lead", {
-                enquiryId: existing.enquiryId,
-                repeatCount: repeatNumber,
-            });
-
-            return res.status(200).send({
-                success: true,
-                message:
-                    "Thanks! We already have your enquiry — our team will reach out, and we've noted your latest details.",
-                data: { enquiryId: existing.enquiryId, repeatCount: repeatNumber },
-            });
-        }
-
-        const seq = await nextSequence("enquiry");
-        const enquiryId = `ENQ-${String(seq).padStart(4, "0")}`;
-
-        const record = new AppointmentBooking({
-            name: name.trim(),
+        const input = {
+            name,
             phonenumber,
             email: email || undefined,
             location: location || undefined,
@@ -682,18 +634,38 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             service: service || undefined,
             vitals: Array.isArray(vitals) && vitals.length ? vitals : undefined,
             status: "enquiry",
-            enquiryId,
-        });
-        await record.save();
-        logger.info("Public booking created", {
-            enquiryId,
+        };
+
+        // Same createBooking() service the dashboard uses — so a public lead now
+        // gets the SAME customer linkage + invoice handling + guards. Repeat
+        // folding stays on for the public form.
+        const result = await createBooking(input, {
             source: source || "public_booking_form",
+            foldOpenRepeats: true,
         });
+
+        if (!result.ok) {
+            return res
+                .status(result.code)
+                .send({ success: false, message: result.message });
+        }
+
+        if (result.folded) {
+            return res.status(200).send({
+                success: true,
+                message:
+                    "Thanks! We already have your enquiry — our team will reach out, and we've noted your latest details.",
+                data: {
+                    enquiryId: result.appointment.enquiryId,
+                    repeatCount: result.repeatCount,
+                },
+            });
+        }
 
         return res.status(201).send({
             success: true,
             message: "Booking received — our team will reach out shortly.",
-            data: { enquiryId },
+            data: { enquiryId: result.appointment.enquiryId },
         });
     } catch (error: any) {
         console.error("[addPublicEnquiry]", error);

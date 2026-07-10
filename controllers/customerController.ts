@@ -69,20 +69,14 @@ export async function createCustomer(req: Request, res: Response) {
 
     const existing = await Customer.findOne({ phone }).exec();
     if (existing) {
-      // Update name/address if changed; keep customer_id stable.
-      if (email || address) {
-        existing.name = name.trim();
-        existing.email = email ?? existing.email;
-        existing.address = address ?? existing.address;
-        await existing.save();
-      } else if (existing.name !== name.trim()) {
-        existing.name = name.trim();
-        await existing.save();
-      }
-
+      // A customer with this phone already exists. Don't silently overwrite
+      // their stored name/email/address on a "create" (a typo'd re-entry would
+      // clobber good data). Return the existing record flagged as a duplicate;
+      // edits go through updateCustomer explicitly.
       return res.status(200).send({
         success: true,
-        message: "Customer already exists — updated.",
+        duplicate: true,
+        message: `A customer with this phone already exists (${existing.customer_id}).`,
         data: existing,
       });
     }
