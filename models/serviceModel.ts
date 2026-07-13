@@ -18,20 +18,24 @@ const serviceSchema = new Schema(
         description: {
             type: String,
         },
+        // ── T31 pricing — the service's two prices (used when added to a visit) ──
+        // discountedPrice when a therapist recommends it + discount applied, else originalPrice.
+        originalPrice: { type: Number, min: 0 },
+        discountedPrice: { type: Number, min: 0 },
+
+        // ── DEPRECATED (kept until the T31 data migration, then removed) ──
+        // Old flat price + recommended price → replaced by the fields above.
         price: {
             type: Number,
-            required: true,
             min: 0,
         },
-        // Discounted price used when a therapist recommends this service during a
-        // visit (the "recommended price"). Optional; falls back to price if unset.
         recommendedPrice: {
             type: Number,
             min: 0,
         },
+        // DEPRECATED (T31): category is going away. Optional until migration.
         category: {
             type: String,
-            required: true,
         },
         hsnCode: {
             type: String,

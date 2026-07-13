@@ -14,11 +14,14 @@ function packageFieldsInvalid(body: any): boolean {
 
 export const addService = async (req: Request, res: Response) => {
     try {
-        const { name, price, category } = req.body;
-        if (!name || price === undefined || price === null || !category) {
+        const { name, originalPrice, discountedPrice } = req.body;
+        const missingPrice = [originalPrice, discountedPrice].some(
+            (v) => v === undefined || v === null,
+        );
+        if (!name || missingPrice) {
             return res.status(400).send({
                 success: false,
-                message: "Name, price and category are required.",
+                message: "Name, original price and discounted price are required.",
             });
         }
 
