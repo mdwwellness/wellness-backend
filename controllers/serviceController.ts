@@ -94,25 +94,38 @@ export const deleteService = async (req: Request, res: Response) => {
     try {
         const { serviceId } = req.params;
 
-        const [appointmentCount, invoiceCount] = await Promise.all([
-            AppointmentBooking.countDocuments({
+        const [appointments, invoices] = await Promise.all([
+            AppointmentBooking.find({
                 $or: [
                     { packageServiceId: serviceId },
                     { "recommendedServices.serviceId": serviceId },
                 ],
-            }),
-            Invoice.countDocuments({
+            })
+                .select("enquiryId")
+                .lean(),
+            Invoice.find({
                 $or: [
                     { package_ref: serviceId },
                     { "locked_addon_items.serviceId": serviceId },
                 ],
-            }),
+            })
+                .select("invoice_id")
+                .lean(),
         ]);
-        const totalCount = appointmentCount + invoiceCount;
+        const totalCount = appointments.length + invoices.length;
         if (totalCount > 0) {
+            const bookingIds = appointments
+                .map((a: any) => a.enquiryId)
+                .filter(Boolean);
+            const invoiceIds = invoices
+                .map((i: any) => i.invoice_id)
+                .filter(Boolean);
+            const preview = [...bookingIds, ...invoiceIds].slice(0, 6).join(", ");
+            const more = totalCount > 6 ? ` +${totalCount - 6} more` : "";
             return res.status(409).send({
                 success: false,
-                message: `Cannot delete — this service is used by ${totalCount} appointment(s)/invoice(s).`,
+                message: `Cannot delete — used by ${totalCount} record(s): ${preview}${more}. Remove or reassign these first.`,
+                blockedBy: { appointments: bookingIds, invoices: invoiceIds },
             });
         }
 
