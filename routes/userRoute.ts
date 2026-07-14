@@ -4,16 +4,20 @@ import {
   adminRegisterUser,
   completeProfile,
   deleteUser,
+  forgotPassword,
   getAllUsers,
   login,
   logoutUser,
   refreshToken,
+  resetPassword,
 } from "../controllers/userController.ts";
 import userAuth from "../middlewares/userAuth.ts";
 import requireRole from "../middlewares/requireRole.ts";
 const userRouter = express.Router();
 
 userRouter.post("/login", login);
+userRouter.post("/forgot-password", forgotPassword);
+userRouter.post("/reset-password", resetPassword);
 userRouter.post("/logout", userAuth, logoutUser);
 userRouter.post("/refresh-token", refreshToken);
 userRouter.get("/getallusers", userAuth, getAllUsers);

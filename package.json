@@ -21,6 +21,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^6.18.0",
     "mongoose": "^8.17.1",
+    "nodemailer": "^9.0.3",
     "nodemon": "^3.1.10",
     "pdfkit": "^0.19.1",
     "tsx": "^4.21.0",
@@ -31,6 +32,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"

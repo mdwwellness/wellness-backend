@@ -1,7 +1,9 @@
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import User from "../models/userModel.ts";
 import bcrypt from "bcryptjs";
 import { ROLES } from "../lib/index.ts";
+import { sendPasswordResetEmail } from "../lib/mailer.ts";
 import express from "express";
 import type { Request, Response } from "express";
 
@@ -113,6 +115,88 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Forgot password — step 1: email a 6-digit code (hashed + 10-min expiry).
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { userEmail } = req.body;
+    if (!userEmail) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required" });
+    }
+    const user = await User.findOne({ userEmail });
+    // Only send when the account exists, but respond the same either way so
+    // we don't reveal which emails are registered.
+    if (user) {
+      const otp = String(crypto.randomInt(100000, 1000000)); // 6 digits
+      const salt = await bcrypt.genSalt(10);
+      user.passwordResetOTP = await bcrypt.hash(otp, salt);
+      user.passwordResetOTPExpires = new Date(Date.now() + 10 * 60 * 1000);
+      await user.save();
+      await sendPasswordResetEmail(user.userEmail, otp, user.userfName);
+    }
+    return res.status(200).json({
+      success: true,
+      message: "If that email is registered, a reset code has been sent.",
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not send the reset code",
+    });
+  }
+};
+
+// Forgot password — step 2: verify the code and set a new password.
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { userEmail, otp, newPassword } = req.body;
+    if (!userEmail || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Email, code and new password are all required",
+      });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 8 characters",
+      });
+    }
+    const user = await User.findOne({ userEmail });
+    if (!user || !user.passwordResetOTP || !user.passwordResetOTPExpires) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid or expired code" });
+    }
+    if (user.passwordResetOTPExpires.getTime() < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: "This code has expired — request a new one.",
+      });
+    }
+    const ok = await bcrypt.compare(String(otp).trim(), user.passwordResetOTP);
+    if (!ok) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid or expired code" });
+    }
+    user.userPassword = newPassword; // pre-save hook re-hashes it
+    user.passwordResetOTP = null;
+    user.passwordResetOTPExpires = null;
+    user.refreshToken = null; // sign out any existing sessions
+    await user.save();
+    return res.status(200).json({
+      success: true,
+      message: "Password reset. You can now log in with your new password.",
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({ success: false, message: error.message || "Server error" });
   }
 };
 
