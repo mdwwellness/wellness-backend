@@ -536,13 +536,94 @@ export const completeSession = async (req: Request, res: Response) => {
 export const updateAppointment = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
+        const updateData = { ...req.body };
 
-        const updated = await AppointmentBooking.findByIdAndUpdate(
-            id,
-            updateData,
-            { new: true },
-        ).exec();
+        const current = await AppointmentBooking.findById(id).exec();
+        if (!current) {
+            return res.status(404).send({
+                success: false,
+                message: "Appointment not found",
+            });
+        }
+        const cur = current as any;
+
+        // ── Actor: from the verified JWT (userAuth), never the client body. ──
+        // Login stores user.id = User._id, and reachedOutBy.userId is set to that
+        // same id on the frontend — so this ownership comparison is sound.
+        const user = req.user as any;
+        const actorId = String(user?._id ?? user?.id ?? "");
+        const actorName = user?.userfName
+            ? `${user.userfName ?? ""} ${user.userlName ?? ""}`.trim()
+            : (user?.userEmail ?? "someone");
+        const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
+
+        // ── Executive-lock (T3/T4/T5): ownership-aware edits + authoritative audit. ──
+        const ownerId = cur.reachedOutBy?.userId ?? "";
+        const ownerName = cur.reachedOutBy?.name ?? "another executive";
+        const isOwner = !!ownerId && !!actorId && ownerId === actorId;
+        const nonOwnerExec = !!ownerId && !isOwner && !isAdmin;
+
+        // Reason travels in overrideReason (T3/T5) / reassignReason (T4) — not columns.
+        const reason = String(
+            req.body.overrideReason ?? req.body.reassignReason ?? "",
+        ).trim();
+        delete updateData.overrideReason;
+        delete updateData.reassignReason;
+
+        const changingTherapist =
+            updateData.doctorId !== undefined &&
+            (updateData.doctorId ?? "") !== (cur.doctorId ?? "");
+        const reassigningTherapist = changingTherapist && !!cur.doctorId;
+        // Only changing FROM an existing owner TO a different one is gated —
+        // claiming an unclaimed lead stays free.
+        const newOwnerId = updateData.reachedOutBy?.userId ?? "";
+        const changingOwner = !!ownerId && !!newOwnerId && newOwnerId !== ownerId;
+
+        if (changingOwner && !isAdmin) {
+            return res.status(403).send({
+                success: false,
+                message: "Only an admin can reassign the lead owner.",
+            });
+        }
+        if (nonOwnerExec && !reason) {
+            return res.status(400).send({
+                success: false,
+                message: `This lead is owned by ${ownerName}. Add a reason to edit it.`,
+            });
+        }
+        if (reassigningTherapist && !isAdmin && !reason) {
+            return res.status(400).send({
+                success: false,
+                message: "Reassigning the therapist needs a reason.",
+            });
+        }
+
+        // ── Server-stamped audit entries (actor from the JWT, not the client). ──
+        const now = new Date().toISOString();
+        const entries: { at: string; userId: string; name: string; action: string }[] = [];
+        if (nonOwnerExec) {
+            entries.push({
+                at: now, userId: actorId, name: actorName,
+                action: `Edited ${ownerName}'s lead — reason: ${reason}`,
+            });
+        }
+        if (reassigningTherapist) {
+            entries.push({
+                at: now, userId: actorId, name: actorName,
+                action: `Therapist reassigned (${cur.doctorId} → ${updateData.doctorId})${reason ? ` — reason: ${reason}` : ""}`,
+            });
+        }
+        if (reason && !updateData.statusNote) updateData.statusNote = reason;
+        if (entries.length) {
+            const base = Array.isArray(updateData.activityLog)
+                ? updateData.activityLog
+                : (cur.activityLog ?? []);
+            updateData.activityLog = [...base, ...entries];
+        }
+
+        const updated = await AppointmentBooking.findByIdAndUpdate(id, updateData, {
+            new: true,
+        }).exec();
         if (!updated) {
             return res.status(404).send({
                 success: false,
@@ -550,20 +631,14 @@ export const updateAppointment = async (req: Request, res: Response) => {
             });
         }
 
-        // Auto-generate invoice when:
-        // - session marked completed, OR
-        // - online consultation slot is booked (see invoiceGeneration.ts)
+        // Auto-generate / sync invoice (session completed, consult booked, etc.).
         const actor = {
-            name: (req.user as any)?.userfName
-                ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
+            name: user?.userfName
+                ? `${user.userfName ?? ""} ${user.userlName ?? ""}`.trim()
                 : undefined,
-            email: (req.user as any)?.userEmail,
+            email: user?.userEmail,
         };
-
-        await safeSyncInvoiceFromAppointment({
-            appointment: updated,
-            actor,
-        });
+        await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
 
         return res.status(200).send({
             success: true,

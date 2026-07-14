@@ -205,7 +205,7 @@ export const adminRegisterUser = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-export const adminEditUserProfile = async (req:Request, res:Response) => {
+export const adminEditUserProfile = async (req: Request, res: Response) => {
   try {
     const {
       userId,
@@ -216,11 +216,53 @@ export const adminEditUserProfile = async (req:Request, res:Response) => {
       role,
       userPassword,
     } = req.body;
+    if (!userId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "User ID required" });
+    }
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
-    const roleChanged = role && role !== user.role;
+
+    const roleChanged = role !== undefined && role !== user.role;
+    const isAdminRole = (r: string) => r === "SUPER_ADMIN" || r === "ADMIN";
+
+    // Don't demote the last remaining admin — that orphans user management.
+    if (roleChanged && isAdminRole(user.role) && !isAdminRole(role)) {
+      const adminCount = await User.countDocuments({
+        role: { $in: ["SUPER_ADMIN", "ADMIN"] },
+        isActive: true,
+      });
+      if (adminCount <= 1) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot remove the last admin's admin role.",
+        });
+      }
+    }
+
+    // Email / phone must stay unique across other users.
+    if (userEmail !== undefined && userEmail !== user.userEmail) {
+      const dupe = await User.findOne({ userEmail, _id: { $ne: userId } });
+      if (dupe) {
+        return res.status(400).json({
+          success: false,
+          message: "Email already in use by another user.",
+        });
+      }
+    }
+    if (userPhone !== undefined && userPhone && userPhone !== user.userPhone) {
+      const dupe = await User.findOne({ userPhone, _id: { $ne: userId } });
+      if (dupe) {
+        return res.status(400).json({
+          success: false,
+          message: "Phone already in use by another user.",
+        });
+      }
+    }
+
     if (userfName !== undefined) user.userfName = userfName;
     if (userlName !== undefined) user.userlName = userlName;
     if (userEmail !== undefined) user.userEmail = userEmail;
@@ -229,26 +271,33 @@ export const adminEditUserProfile = async (req:Request, res:Response) => {
 
     if (userPassword) {
       if (userPassword.length < 6) {
-        return res
-          .status(400)
-          .json({ message: "Password must be at least 6 characters" });
+        return res.status(400).json({
+          success: false,
+          message: "Password must be at least 6 characters",
+        });
       }
+      user.userPassword = userPassword; // re-hashed by the model's pre-save hook
+    }
 
-      user.userPassword = userPassword;
-    }
-    if (roleChanged) {
-      user.refreshToken = "";
-    }
+    // A role change invalidates the target's session — force a fresh login so
+    // the new permissions take effect immediately.
+    if (roleChanged) user.refreshToken = "";
+
     await user.save();
     return res.status(200).json({
       success: true,
       message: "User updated successfully",
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      const field = Object.keys(error.keyPattern ?? {})[0];
+      return res.status(400).json({
+        success: false,
+        message: `${field === "userEmail" ? "Email" : "Phone number"} already in use.`,
+      });
+    }
     console.error("Admin update user error:", error);
-    return res.status(500).json({
-      message: "Server error",
-    });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 export const completeProfile = async (req:Request, res:Response) => {

@@ -1,5 +1,6 @@
 import express from "express";
 import {
+  adminEditUserProfile,
   adminRegisterUser,
   completeProfile,
   deleteUser,
@@ -22,6 +23,12 @@ userRouter.delete(
   userAuth,
   requireRole("SUPER_ADMIN", "ADMIN"),
   deleteUser,
+);
+userRouter.patch(
+  "/admin/update-user",
+  userAuth,
+  requireRole("SUPER_ADMIN", "ADMIN"),
+  adminEditUserProfile,
 );
 userRouter.post(
   "/admin/register-user",
