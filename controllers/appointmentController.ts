@@ -654,31 +654,46 @@ export const updateAppointment = async (req: Request, res: Response) => {
     }
 };
 
-// ── Public booking endpoint (NO auth) ─────────────────────────────────────────
-// Used by the public mdw patient site's booking form. Simple per-IP rate limit.
+// ── Rate limiting for the public (NO auth) endpoints ──────────────────────────
+// Buckets are keyed "<scope>:<ip>" so endpoints never share a budget: a customer
+// loading their payment page must not be able to lock a different person out of
+// the booking form, or vice versa.
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_PER_MINUTE = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-function tooManyRequests(ip: string): boolean {
+// Writes: a real person fills this form once. Tight, to blunt spam.
+const ENQUIRY_LIMIT_PER_MINUTE = 5;
+// Reads: idempotent, no side effects, and already guarded by a 2^128 token —
+// the limit here is only anti-hammering. It must be generous: Indian mobile
+// carriers run CGNAT, so MANY paying customers share one public IP and a tight
+// limit would have them 429 each other out of paying.
+const PAY_LOOKUP_LIMIT_PER_MINUTE = 60;
+
+function tooManyRequests(key: string, limit: number): boolean {
     const now = Date.now();
-    const bucket = rateLimitBuckets.get(ip);
+    const bucket = rateLimitBuckets.get(key);
     if (!bucket || bucket.resetAt < now) {
-        rateLimitBuckets.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        rateLimitBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
         return false;
     }
     bucket.count++;
-    return bucket.count > RATE_LIMIT_PER_MINUTE;
+    return bucket.count > limit;
 }
+
+function clientIp(req: Request): string {
+    return (
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.socket.remoteAddress ||
+        "unknown"
+    );
+}
+
+// ── Public booking endpoint (NO auth) ─────────────────────────────────────────
+// Used by the public mdw patient site's booking form.
 
 export const addPublicEnquiry = async (req: Request, res: Response) => {
     try {
-        const ip =
-            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-            req.socket.remoteAddress ||
-            "unknown";
-
-        if (tooManyRequests(ip)) {
+        if (tooManyRequests(`enquiry:${clientIp(req)}`, ENQUIRY_LIMIT_PER_MINUTE)) {
             return res.status(429).send({
                 success: false,
                 message: "Too many submissions. Please try again in a minute.",
@@ -792,12 +807,7 @@ export const createPaymentLink = async (req: Request, res: Response) => {
 // which therapist is coming. Rate-limited like the other public endpoint.
 export const getPublicPaymentSummary = async (req: Request, res: Response) => {
     try {
-        const ip =
-            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-            req.socket.remoteAddress ||
-            "unknown";
-
-        if (tooManyRequests(ip)) {
+        if (tooManyRequests(`pay:${clientIp(req)}`, PAY_LOOKUP_LIMIT_PER_MINUTE)) {
             return res.status(429).send({
                 success: false,
                 message: "Too many requests. Please try again in a minute.",
