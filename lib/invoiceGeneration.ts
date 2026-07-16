@@ -238,6 +238,28 @@ function hasConsultationCharge(appointment: any): boolean {
 }
 
 /**
+ * Price for an appointment's main line item.
+ *
+ * The FRONTEND is the pricing authority — it computes sessions × rate-table
+ * tier (+ add-ons) and sends `quotedPrice`. The service catalogue is only a
+ * fallback for records that never carried an explicit price.
+ *
+ * Returns null when nothing can price it, so callers refuse to invoice rather
+ * than silently bill ₹0. `originalPrice` is the current catalogue field;
+ * `price` is legacy and only exists on pre-T31 services.
+ */
+function resolveMainPrice(appointment: any, service?: any): number | null {
+  if ((appointment.quotedPrice ?? null) != null) {
+    return safeNumber(appointment.quotedPrice);
+  }
+  if ((appointment.paymentAmount ?? null) != null) {
+    return safeNumber(appointment.paymentAmount);
+  }
+  const catalogue = service?.originalPrice ?? service?.price;
+  return catalogue != null ? safeNumber(catalogue) : null;
+}
+
+/**
  * Itemised breakdown of everything the customer consumed on this appointment:
  *   1. Online consultation (if they had one)
  *   2. The therapy package (charged once) OR a standalone therapy service
@@ -263,31 +285,15 @@ async function buildLineItemsFromAppointment(
 
   // 2. Package, or a standalone therapy service.
   if (service?.isPackage) {
-    const pkgPrice =
-      (appointment.quotedPrice ?? null) != null
-        ? safeNumber(appointment.quotedPrice)
-        : (appointment.paymentAmount ?? null) != null
-          ? safeNumber(appointment.paymentAmount)
-          : service?.price != null
-            ? safeNumber(service.price)
-            : 0;
     line_items.push({
       description: `${service.name} (${service.packageCount ?? "?"} sessions)`,
-      price: pkgPrice,
+      price: resolveMainPrice(appointment, service) ?? 0,
     });
   } else if (!hasConsultationCharge(appointment)) {
-    const unitPrice =
-      (appointment.quotedPrice ?? null) != null
-        ? safeNumber(appointment.quotedPrice)
-        : (appointment.paymentAmount ?? null) != null
-          ? safeNumber(appointment.paymentAmount)
-          : service?.price != null
-            ? safeNumber(service.price)
-            : 0;
     line_items.push({
       description:
         (appointment.service ?? "")?.toString() || service?.name || "Therapy",
-      price: unitPrice,
+      price: resolveMainPrice(appointment, service) ?? 0,
     });
   }
 
@@ -312,13 +318,6 @@ async function createInvoiceFromAppointment(args: {
   const existing = await Invoice.findOne({ appointment_id: appointment._id }).exec();
   if (existing) return existing;
 
-  // Year comes from completion timestamp if available.
-  const completedAt = appointment.completedAt ? new Date(appointment.completedAt) : new Date();
-  const year = completedAt.getFullYear();
-
-  const seq = await nextYearlySequence("invoice", year);
-  const invoice_id = formatInvoiceId(year, seq);
-
   const customer = await ensureCustomerForAppointment(appointment);
 
   const service = appointment.packageServiceId
@@ -338,6 +337,25 @@ async function createInvoiceFromAppointment(args: {
   );
 
   const items_subtotal = line_items.reduce((sum, li) => sum + safeNumber(li.price), 0);
+
+  // Nothing could price this appointment — no quotedPrice, no paymentAmount and
+  // no catalogue price. Refuse rather than bill ₹0: a phantom invoice would burn
+  // a GST-sequential INV number that can never be reused.
+  if (!line_items.length || items_subtotal <= 0) {
+    console.warn(
+      `[invoice] skipped ${appointment.enquiryId ?? appointment._id}: no price could be resolved (set quotedPrice or paymentAmount first).`,
+    );
+    return null;
+  }
+
+  // Year + sequence are allocated only AFTER the price guard, so a refused
+  // invoice never consumes an INV-YYYY-#### number.
+  const completedAt = appointment.completedAt ? new Date(appointment.completedAt) : new Date();
+  const year = completedAt.getFullYear();
+
+  const seq = await nextYearlySequence("invoice", year);
+  const invoice_id = formatInvoiceId(year, seq);
+
   const total = items_subtotal;
 
   const packageAdvance = appointment.paymentReceived
