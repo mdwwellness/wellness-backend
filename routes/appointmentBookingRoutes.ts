@@ -6,6 +6,8 @@ import {
   setAddonPaymentStatus,
   completeSession,
   addPublicEnquiry,
+  createPaymentLink,
+  getPublicPaymentSummary,
   deleteAppointment,
   getAllAppointments,
   updateAppointment,
@@ -17,8 +19,13 @@ const appointmentRouter = express.Router();
 // Declared before the authed "/" so there's no chance of middleware overlap.
 appointmentRouter.post("/public", addPublicEnquiry);
 
+// Public, unauthenticated payment summary for the customer's /pay/<token> page.
+// Guarded by an unguessable token, field-limited, and rate-limited.
+appointmentRouter.get("/pay/:token", getPublicPaymentSummary);
+
 appointmentRouter.post("/", userAuth, addAppointmentsDetails);
 appointmentRouter.get("/", userAuth, getAllAppointments);
+appointmentRouter.post("/:id/pay-link", userAuth, createPaymentLink);
 appointmentRouter.post("/:id/recommendations", userAuth, addAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/confirm", userAuth, confirmAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/payment", userAuth, setAddonPaymentStatus);

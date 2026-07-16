@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
@@ -748,5 +749,92 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             success: false,
             message: "Server error — please try again.",
         });
+    }
+};
+
+// ── Payment link ──────────────────────────────────────────────────────────────
+// Mint the unguessable token behind this booking's public /pay/<token> page.
+// The TOKEN IS MINTED SERVER-SIDE ON PURPOSE — never let the client choose it,
+// or a buggy/hostile caller could set a predictable one and expose customers.
+// Idempotent: re-requesting payment returns the same token, so a link already
+// sent to a customer keeps working.
+export const createPaymentLink = async (req: Request, res: Response) => {
+    try {
+        const appointment = await AppointmentBooking.findById(req.params.id);
+        if (!appointment) {
+            return res
+                .status(404)
+                .send({ success: false, message: "Booking not found" });
+        }
+
+        if (!appointment.payToken) {
+            appointment.payToken = crypto.randomBytes(16).toString("hex");
+            await appointment.save();
+        }
+
+        return res.status(200).send({
+            success: true,
+            message: "Payment link ready",
+            data: { payToken: appointment.payToken },
+        });
+    } catch (error: any) {
+        console.error("[createPaymentLink]", error);
+        return res
+            .status(500)
+            .send({ success: false, message: "Server error — please try again." });
+    }
+};
+
+// ── Public payment summary (NO auth) ──────────────────────────────────────────
+// Backs the customer-facing payment page. Anyone holding the link can read this,
+// so it returns ONLY what a customer needs to recognise their own booking and
+// pay for it. Never phone, email, age, location, notes, the activity trail, or
+// which therapist is coming. Rate-limited like the other public endpoint.
+export const getPublicPaymentSummary = async (req: Request, res: Response) => {
+    try {
+        const ip =
+            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+            req.socket.remoteAddress ||
+            "unknown";
+
+        if (tooManyRequests(ip)) {
+            return res.status(429).send({
+                success: false,
+                message: "Too many requests. Please try again in a minute.",
+            });
+        }
+
+        const token = String(req.params.token ?? "");
+        // Tokens are 32 hex chars — anything shorter is a probe, not a typo.
+        // Bail before touching the database.
+        if (!/^[a-f0-9]{32}$/.test(token)) {
+            return res
+                .status(404)
+                .send({ success: false, message: "Payment link not found" });
+        }
+
+        const booking = await AppointmentBooking.findOne({ payToken: token });
+        if (!booking) {
+            return res
+                .status(404)
+                .send({ success: false, message: "Payment link not found" });
+        }
+
+        return res.status(200).send({
+            success: true,
+            message: "ok",
+            data: {
+                enquiryId: booking.enquiryId,
+                name: booking.name,
+                typeOfappointment: booking.typeOfappointment,
+                amount: booking.quotedPrice,
+                paymentReceived: !!booking.paymentReceived,
+            },
+        });
+    } catch (error: any) {
+        console.error("[getPublicPaymentSummary]", error);
+        return res
+            .status(500)
+            .send({ success: false, message: "Server error — please try again." });
     }
 };

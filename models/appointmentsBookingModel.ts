@@ -182,6 +182,18 @@ const AppointmentBookingSchema = new Schema({
         type: String,
     },
 
+    // ── Public payment link ──
+    //    Unguessable token backing the customer-facing /pay/<token> page.
+    //    Minted on demand when an executive requests payment (most records
+    //    never get one — hence sparse). NEVER derive this from enquiryId:
+    //    those are sequential and would let anyone enumerate other customers.
+    payToken: {
+        type: String,
+        unique: true,
+        sparse: true,
+        index: true,
+    },
+
     // ── Funnel checkpoint — payment (patient → clinic) ──
     paymentReceived: {
         type: Boolean,
