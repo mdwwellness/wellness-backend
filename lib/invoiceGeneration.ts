@@ -454,6 +454,19 @@ export async function syncInvoiceFromAppointment(args: {
     return maybeCreateInvoiceForAppointment({ appointment, actor });
   }
 
+  // A voided invoice is a frozen audit record — nothing re-derives it.
+  if (existing.voided) return existing;
+
+  // ── The money is frozen once the invoice is paid ──
+  // Read the STORED status before we compute anything: re-deriving the amount
+  // from the current appointment would silently re-price an invoice the
+  // customer has already paid against (e.g. an executive edits the fee in the
+  // enquiry drawer after payment). A real change to a settled invoice goes
+  // through void + reissue, not a silent rewrite. Non-money FACTS still sync
+  // below — under the pay-first funnel the therapist is assigned AFTER payment,
+  // so a paid invoice must still be able to pick up its doctor.
+  const wasPaid = existing.payment_status === "paid";
+
   // Backfill customer_id onto the appointment on the update path too — the
   // create path already does this via maybeCreate. Idempotent (keyed by phone).
   await ensureCustomerForAppointment(appointment);
@@ -500,15 +513,19 @@ export async function syncInvoiceFromAppointment(args: {
     (actor?.email ?? "").trim() ||
     "system";
 
-  existing.invoice_type = invoice_type;
-  existing.line_items = line_items;
-  existing.items_subtotal = items_subtotal;
-  existing.total = total;
-  existing.advance_paid = advance_paid;
-  existing.balance_due = balance_due;
-  existing.payment_status = payment_status;
-  // Backfill the therapist from the appointment — an invoice created before the
-  // physio was assigned would otherwise never show one.
+  // Money + billing identity: re-derived only while the invoice is still open.
+  // Frozen once paid (see wasPaid above).
+  if (!wasPaid) {
+    existing.invoice_type = invoice_type;
+    existing.line_items = line_items;
+    existing.items_subtotal = items_subtotal;
+    existing.total = total;
+    existing.advance_paid = advance_paid;
+    existing.balance_due = balance_due;
+    existing.payment_status = payment_status;
+  }
+  // Non-money facts sync either way — an invoice created before the physio was
+  // assigned would otherwise never show a therapist.
   existing.therapist_name = appointment.doctor || existing.therapist_name;
   (existing as any).therapist_id =
     appointment.doctorId || (existing as any).therapist_id || "";
@@ -519,17 +536,32 @@ export async function syncInvoiceFromAppointment(args: {
     : existing.session_number;
   existing.last_edited_by = editor;
   existing.last_edited_at = new Date();
+
+  // Only re-issue the PDF when something it actually shows has changed. For an
+  // open invoice that's anything (it re-derives freely); for a paid one it's
+  // just the synced facts (therapist/session) — so a no-op appointment save no
+  // longer churns pdf_url or hammers UploadThing on a settled invoice.
+  const pdfVisibleChanged =
+    !wasPaid ||
+    existing.isModified("line_items") ||
+    existing.isModified("total") ||
+    existing.isModified("therapist_name") ||
+    (existing as any).isModified("therapist_id") ||
+    existing.isModified("session_number");
+
   await existing.save();
 
-  try {
-    const pdf_url = await ensureInvoicePdfGeneratedAndUploaded(existing);
-    existing.pdf_url = pdf_url;
-    await existing.save();
-  } catch (err) {
-    logger.error(
-      `[invoice-pdf] regeneration failed for invoice ${existing.invoice_id}`,
-      err,
-    );
+  if (pdfVisibleChanged) {
+    try {
+      const pdf_url = await ensureInvoicePdfGeneratedAndUploaded(existing);
+      existing.pdf_url = pdf_url;
+      await existing.save();
+    } catch (err) {
+      logger.error(
+        `[invoice-pdf] regeneration failed for invoice ${existing.invoice_id}`,
+        err,
+      );
+    }
   }
 
   return existing;
