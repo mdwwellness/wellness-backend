@@ -259,12 +259,27 @@ function resolveMainPrice(appointment: any, service?: any): number | null {
   return catalogue != null ? safeNumber(catalogue) : null;
 }
 
+// Mirror of the frontend BOOKING_TYPES (src/components/pages/enquiries/booking.ts).
+// KEEP IN SYNC — two values. The confirmed booking type is the billing truth.
+const BOOKING_TYPE_SERVICE: Record<string, string> = {
+  consultation: "Online Consultation",
+  appointment: "Home Visit Consultation",
+};
+
+// Records that came through the public-site enquiry funnel carry one of these
+// as `service`. ONLY those get the confirmed-booking-type label above — a
+// session booked via the dashboard's "Book Appointment" form also has
+// typeOfappointment:"appointment" but means "a session", not a home visit.
+const ENQUIRY_OFFERINGS = new Set(["Online Consultation", "Home Therapy", "Vitals Check"]);
+
 /**
  * Itemised breakdown of everything the customer consumed on this appointment:
- *   1. Online consultation (if they had one)
- *   2. The therapy package (charged once) OR a standalone therapy service
- *   3. Each confirmed add-on
- * There is one invoice per appointment (updated in place), so the package is
+ *   1. The main line item — the executive-confirmed booking type
+ *      (`typeOfappointment`) when present, since that's the pay-first funnel's
+ *      billing truth; otherwise the legacy consultation/package/standalone-
+ *      therapy logic (pre-dates the confirmed-type field).
+ *   2. Each confirmed add-on.
+ * There is one invoice per appointment (updated in place), so the main item is
  * charged a single time regardless of how many sessions have been completed.
  */
 async function buildLineItemsFromAppointment(
@@ -275,34 +290,42 @@ async function buildLineItemsFromAppointment(
 ): Promise<{ description: string; price: number }[]> {
   const line_items: { description: string; price: number }[] = [];
 
-  // 1. Online consultation fee.
-  if (hasConsultationCharge(appointment)) {
-    line_items.push({
-      description: "Online Consultation",
-      price: CONSULT_FEE,
-    });
-  }
+  const confirmedService =
+    !service?.isPackage &&
+    appointment.typeOfappointment &&
+    ENQUIRY_OFFERINGS.has(appointment.service)
+      ? BOOKING_TYPE_SERVICE[appointment.typeOfappointment as string]
+      : undefined;
 
-  // 2. Package, or a standalone therapy service.
-  if (service?.isPackage) {
+  if (confirmedService) {
+    // Pay-first funnel: the executive-confirmed booking type is authoritative —
+    // NOT the stale `service` the customer first asked for on the public site.
     line_items.push({
-      description: `${service.name} (${service.packageCount ?? "?"} sessions)`,
+      description: confirmedService,
       price: resolveMainPrice(appointment, service) ?? 0,
     });
-  } else if (!hasConsultationCharge(appointment)) {
-    line_items.push({
-      description:
-        (appointment.service ?? "")?.toString() || service?.name || "Therapy",
-      price: resolveMainPrice(appointment, service) ?? 0,
-    });
+  } else {
+    // Legacy path (no confirmed type): original service/package logic.
+    if (hasConsultationCharge(appointment)) {
+      line_items.push({ description: "Online Consultation", price: CONSULT_FEE });
+    }
+    if (service?.isPackage) {
+      line_items.push({
+        description: `${service.name} (${service.packageCount ?? "?"} sessions)`,
+        price: resolveMainPrice(appointment, service) ?? 0,
+      });
+    } else if (!hasConsultationCharge(appointment)) {
+      line_items.push({
+        description:
+          (appointment.service ?? "")?.toString() || service?.name || "Therapy",
+        price: resolveMainPrice(appointment, service) ?? 0,
+      });
+    }
   }
 
-  // 3. Add-ons (confirmed live + locked-on-invoice, deduped).
+  // Add-ons (confirmed live + locked-on-invoice, deduped) — appended in all paths.
   for (const addon of mergeAddonItems(appointment, lockedAddonItems)) {
-    line_items.push({
-      description: addon.description,
-      price: addon.price,
-    });
+    line_items.push({ description: addon.description, price: addon.price });
   }
 
   return line_items;
