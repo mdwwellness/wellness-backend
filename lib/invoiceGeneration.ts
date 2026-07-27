@@ -100,7 +100,11 @@ function hasConsultationSlotBooked(appointment: any): boolean {
 
 /** When to auto-create an invoice for this appointment (idempotent). */
 export function shouldAutoGenerateInvoice(appointment: any): boolean {
-  if (appointment.paymentReceived && appointment.packageServiceId) return true;
+  // Any paid booking gets its invoice as soon as payment is recorded. The
+  // pay-first funnel collects payment BEFORE the visit, so waiting for
+  // "completed" (or a package/consultation signal) would leave a paid home
+  // visit with no invoice on the ledger. (report §3.2)
+  if (appointment.paymentReceived) return true;
 
   if (appointment.status === "completed") return true;
 

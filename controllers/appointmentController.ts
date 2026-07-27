@@ -599,6 +599,22 @@ export const updateAppointment = async (req: Request, res: Response) => {
             });
         }
 
+        // ── Pay-before-therapist gate (a money rule, not a permission). A
+        // therapist may not be assigned to an unpaid booking. The drawer disables
+        // the control, but that is only a courtesy — enforce it server-side so a
+        // direct API call or a UI slip can't skip payment. Applies to everyone;
+        // an exception just means recording the payment first. (report §3.1) ──
+        const assigningTherapist =
+            changingTherapist && (updateData.doctorId ?? "") !== "";
+        const willBePaid =
+            updateData.paymentReceived ?? cur.paymentReceived ?? false;
+        if (assigningTherapist && !willBePaid) {
+            return res.status(400).send({
+                success: false,
+                message: "Record the payment before assigning a therapist.",
+            });
+        }
+
         // ── Server-stamped audit entries (actor from the JWT, not the client). ──
         const now = new Date().toISOString();
         const entries: { at: string; userId: string; name: string; action: string }[] = [];
