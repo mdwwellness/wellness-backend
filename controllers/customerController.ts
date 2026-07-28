@@ -67,16 +67,22 @@ export async function createCustomer(req: Request, res: Response) {
       });
     }
 
-    const existing = await Customer.findOne({ phone }).exec();
+    // Identity is phone + person: a different name on the same (household) number
+    // is a different customer, so only an exact phone+name match is a duplicate.
+    const target = name.trim().toLowerCase();
+    const onThisPhone = await Customer.find({ phone }).exec();
+    const existing = onThisPhone.find(
+      (c) => (c.name ?? "").toString().trim().toLowerCase() === target,
+    );
     if (existing) {
-      // A customer with this phone already exists. Don't silently overwrite
-      // their stored name/email/address on a "create" (a typo'd re-entry would
-      // clobber good data). Return the existing record flagged as a duplicate;
-      // edits go through updateCustomer explicitly.
+      // Same number AND same name already exists. Don't silently overwrite their
+      // stored name/email/address on a "create" (a typo'd re-entry would clobber
+      // good data). Return the existing record flagged as a duplicate; edits go
+      // through updateCustomer explicitly.
       return res.status(200).send({
         success: true,
         duplicate: true,
-        message: `A customer with this phone already exists (${existing.customer_id}).`,
+        message: `A customer named ${existing.name} with this phone already exists (${existing.customer_id}).`,
         data: existing,
       });
     }

@@ -51,8 +51,16 @@ export async function ensureCustomerForAppointment(
   const email = (appointment.email ?? "").toString();
   const address = (appointment.location ?? "").toString(); // location used as address context in MVP
 
-  // Prefer stable identity by phone.
-  let customer = await Customer.findOne({ phone }).exec();
+  // Identity is phone + person, not phone alone: one household number can serve
+  // several patients. Reuse the record whose name matches (case-insensitively);
+  // a new name on the same number becomes its own customer instead of borrowing
+  // someone else's identity.
+  const target = name.trim().toLowerCase();
+  const onThisPhone = await Customer.find({ phone }).exec();
+  let customer =
+    onThisPhone.find(
+      (c) => (c.name ?? "").toString().trim().toLowerCase() === target,
+    ) ?? null;
   if (!customer) {
     const seq = await nextSequence("customer");
     const customer_id = formatCustomerId(seq);

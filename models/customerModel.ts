@@ -14,10 +14,12 @@ const customerSchema = new Schema(
       trim: true,
     },
     phone: {
-      // Stored as Number to match appointment phonenumber usage.
+      // Stored as Number to match appointment phonenumber usage. NOT unique: one
+      // household phone can belong to several patients, so identity is
+      // phone + name (deduped in ensureCustomerForAppointment / createCustomer),
+      // not phone alone.
       type: Number,
       required: true,
-      unique: true,
       index: true,
     },
     email: {
