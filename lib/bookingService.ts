@@ -93,10 +93,19 @@ export async function createBooking(
 
   // Repeat folding for open leads (opt-in).
   if (opts.foldOpenRepeats) {
-    const existing = await AppointmentBooking.findOne({
+    // Fold only a TRUE repeat: same phone AND same person. A different name on
+    // the same (often shared / household) number is a different patient, so
+    // they get their own lead instead of being folded into — and hidden behind
+    // — someone else's. Names compare case/space-insensitively, so re-typing the
+    // same name slightly differently still folds.
+    const target = name.trim().toLowerCase();
+    const openLeads = await AppointmentBooking.find({
       phonenumber,
       status: { $in: OPEN_STATUSES },
     });
+    const existing = openLeads.find(
+      (lead) => (lead.name ?? "").trim().toLowerCase() === target,
+    );
     if (existing) {
       const repeatCount = (existing.repeatCount ?? 1) + 1;
 
