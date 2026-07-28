@@ -18,7 +18,7 @@ const generateRefreshToken = (userId: string) => {
     { id: userId },
     process.env.JWT_REFRESH_SECRET || "vivo123refresh",
     {
-      expiresIn: "7d", // Long-lived refresh token
+      expiresIn: "30d", // Long-lived refresh token — keeps the session ~1 month
     },
   );
 };
@@ -91,7 +91,7 @@ export const login = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 Days
     });
 
     res.status(200).json({
