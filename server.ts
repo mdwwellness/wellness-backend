@@ -86,7 +86,9 @@ const connect = async () => {
   }
 };
 
-mongoose.connection.on("connected", () => logger.info("MongoDB connected"));
+mongoose.connection.on("connected", () =>
+  logger.info(`MongoDB connected: ${mongoose.connection.host}`),
+);
 mongoose.connection.on("error", (err) => logger.error("MongoDB error", err));
 mongoose.connection.on("disconnected", () =>
   logger.warn("MongoDB disconnected"),
