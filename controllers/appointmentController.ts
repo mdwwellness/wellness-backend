@@ -621,6 +621,16 @@ export const updateAppointment = async (req: Request, res: Response) => {
         const { id } = req.params;
         const updateData = { ...req.body };
 
+        // Server-managed fields are owned by the visit-OTP + complete-session
+        // endpoints and are NEVER settable via a client update. The work checklist
+        // echoes the WHOLE draft on every checkbox save, so without this a stale
+        // draft silently clobbers them — notably undoing a fresh OTP verification
+        // (which then wrongly blocked checkout).
+        delete (updateData as any).visitOtpHash;
+        delete (updateData as any).visitOtpExpiresAt;
+        delete (updateData as any).visitOtpVerified;
+        delete (updateData as any).sessionNotes;
+
         const current = await AppointmentBooking.findById(id).exec();
         if (!current) {
             return res.status(404).send({
