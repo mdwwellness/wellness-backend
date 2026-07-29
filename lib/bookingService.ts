@@ -91,6 +91,18 @@ export async function createBooking(
     }
   }
 
+  // Pay-first: never assign a therapist before payment is cleared. Self-gating —
+  // only fires when a therapist is on the payload, so a bare enquiry passes.
+  // Mirrors the guard in updateAppointment; kept here so EVERY create path
+  // (dashboard modal, public form, conversion) inherits it and none can skip it.
+  if (input.doctorId && input.paymentReceived !== true) {
+    return {
+      ok: false,
+      code: 400,
+      message: "Record the payment before assigning a therapist.",
+    };
+  }
+
   // Repeat folding for open leads (opt-in).
   if (opts.foldOpenRepeats) {
     // Fold only a TRUE repeat: same phone AND same person. A different name on
