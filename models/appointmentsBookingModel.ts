@@ -46,6 +46,12 @@ const AppointmentBookingSchema = new Schema({
         type: Number,
     },
     // Completed sessions in this package on this single appointment row.
+    // Stable total number of visits for an ad-hoc (modal) multi-session booking.
+    // Catalogue packages get their total from the service's packageCount instead;
+    // sessionNumber is the moving current-session pointer, so it can't hold this.
+    totalSessions: {
+        type: Number,
+    },
     sessionsCompleted: {
         type: Number,
         default: 0,
@@ -225,6 +231,18 @@ const AppointmentBookingSchema = new Schema({
     // ── Therapist work checklist — completed item keys
     //    (e.g. "arrived", "performed", "payment", "completed"). ──
     workChecklist: [{ type: String }],
+
+    // Per-session report log — one entry snapshotted on each session completion
+    // so a multi-session booking keeps every visit's note separately.
+    sessionNotes: [
+        {
+            session: { type: Number },
+            at: { type: String },
+            note: { type: String, default: "" },
+            therapist: { type: String, default: "" },
+            by: { type: String, default: "" },
+        },
+    ],
 
     // ── Origin of the record: "public_booking_form" | "dashboard" | undefined ──
     source: {

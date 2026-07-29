@@ -496,7 +496,11 @@ export const completeSession = async (req: Request, res: Response) => {
             : existing.service
                 ? await Service.findOne({ name: existing.service }).exec()
                 : null;
-        const total = service?.packageCount ?? 1;
+        // Total visits: a catalogue package's count, else an ad-hoc booking's
+        // stable session count (totalSessions). sessionNumber is NOT used — it's
+        // repurposed below as the current-session pointer.
+        const total =
+            service?.packageCount ?? existing.totalSessions ?? 1;
 
         // Ceiling guard: never complete past the package total. Atomic conditional
         // increment — only bumps when the current count (0 if the field is missing)
@@ -571,7 +575,19 @@ export const completeSession = async (req: Request, res: Response) => {
                 // check once confirmed) so they never vanish. Only the per-visit
                 // checklist (arrived/performed/completed) resets for next visit.
                 workChecklist: [],
-                $push: { activityLog: logEntry },
+                // Snapshot this session's note into the per-session log, then blank
+                // the working note so the next visit starts clean.
+                note: "",
+                $push: {
+                    activityLog: logEntry,
+                    sessionNotes: {
+                        session: sessionsDone,
+                        at: new Date().toISOString(),
+                        note: existing.note ?? "",
+                        therapist: existing.doctor ?? "",
+                        by: actorName,
+                    },
+                },
             },
             { new: true },
         ).exec();
