@@ -210,6 +210,13 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
+    // ── Per-visit proof-of-presence OTP ──
+    // Set on "send", consumed+cleared by completeSession, so every session in a
+    // package needs a fresh code before checkout.
+    visitOtpHash: { type: String },
+    visitOtpExpiresAt: { type: Date },
+    visitOtpVerified: { type: Boolean, default: false },
+
     // ── Funnel checkpoint — completion ──
     completedAt: {
         type: Date,

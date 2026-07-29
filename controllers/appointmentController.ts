@@ -1,5 +1,6 @@
 import express from "express";
 import crypto from "node:crypto";
+import bcrypt from "bcryptjs";
 import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
@@ -415,6 +416,58 @@ export const setAddonPaymentStatus = async (req: Request, res: Response) => {
     }
 };
 
+// ── Per-visit proof-of-presence OTP ──────────────────────────────────────────
+// The executive taps "send" → a fresh code is stored (hashed, 15-min expiry) and
+// returned so it can be sent to the customer via wa.me. The therapist enters what
+// the customer reads back → verify → completeSession consumes the verification.
+
+export const sendVisitOtp = async (req: Request, res: Response) => {
+  try {
+    const appt = await AppointmentBooking.findById(req.params.id).exec();
+    if (!appt) {
+      return res.status(404).send({ success: false, message: "Appointment not found" });
+    }
+    // Crypto-random 4-digit code (not Math.random).
+    const code = String(crypto.randomInt(1000, 10000));
+    appt.visitOtpHash = await bcrypt.hash(code, 10);
+    appt.visitOtpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    appt.visitOtpVerified = false;
+    await appt.save();
+    // Code returned so the exec can send it via wa.me (manual interim channel).
+    return res.status(200).send({ success: true, code });
+  } catch (error: any) {
+    console.error("[sendVisitOtp]", error);
+    return res.status(500).send({ success: false, message: "Server error" });
+  }
+};
+
+export const verifyVisitOtp = async (req: Request, res: Response) => {
+  try {
+    const { code } = req.body ?? {};
+    const appt = await AppointmentBooking.findById(req.params.id).exec();
+    if (!appt) {
+      return res.status(404).send({ success: false, message: "Appointment not found" });
+    }
+    if (
+      !appt.visitOtpHash ||
+      !appt.visitOtpExpiresAt ||
+      appt.visitOtpExpiresAt < new Date()
+    ) {
+      return res.status(400).send({ success: false, message: "No active code — send a new one." });
+    }
+    const ok = await bcrypt.compare(String(code ?? "").trim(), appt.visitOtpHash);
+    if (!ok) {
+      return res.status(400).send({ success: false, message: "Incorrect code." });
+    }
+    appt.visitOtpVerified = true;
+    await appt.save();
+    return res.status(200).send({ success: true, message: "Visit verified." });
+  } catch (error: any) {
+    console.error("[verifyVisitOtp]", error);
+    return res.status(500).send({ success: false, message: "Server error" });
+  }
+};
+
 export const completeSession = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
@@ -425,6 +478,15 @@ export const completeSession = async (req: Request, res: Response) => {
             return res.status(404).send({
                 success: false,
                 message: "Appointment not found",
+            });
+        }
+
+        // Per-visit proof-of-presence: no checkout until this visit's OTP is
+        // verified. Consumed below on success, so every session needs a fresh one.
+        if (!existing.visitOtpVerified) {
+            return res.status(400).send({
+                success: false,
+                message: "Verify the visit OTP before checkout.",
             });
         }
 
@@ -446,7 +508,11 @@ export const completeSession = async (req: Request, res: Response) => {
                 _id: id,
                 $expr: { $lt: [{ $ifNull: ["$sessionsCompleted", 0] }, total] },
             },
-            { $inc: { sessionsCompleted: 1 } },
+            {
+                $inc: { sessionsCompleted: 1 },
+                // Consume the verification so the next visit needs a fresh OTP.
+                $set: { visitOtpVerified: false, visitOtpHash: null, visitOtpExpiresAt: null },
+            },
             { new: true },
         ).exec();
         if (!bumped) {

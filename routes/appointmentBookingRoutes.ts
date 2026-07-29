@@ -5,6 +5,8 @@ import {
   confirmAppointmentRecommendation,
   setAddonPaymentStatus,
   completeSession,
+  sendVisitOtp,
+  verifyVisitOtp,
   addPublicEnquiry,
   createPaymentLink,
   getPublicPaymentSummary,
@@ -29,6 +31,8 @@ appointmentRouter.post("/:id/pay-link", userAuth, createPaymentLink);
 appointmentRouter.post("/:id/recommendations", userAuth, addAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/confirm", userAuth, confirmAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/payment", userAuth, setAddonPaymentStatus);
+appointmentRouter.post("/:id/visit-otp/send", userAuth, sendVisitOtp);
+appointmentRouter.post("/:id/visit-otp/verify", userAuth, verifyVisitOtp);
 appointmentRouter.post("/:id/complete-session", userAuth, completeSession);
 appointmentRouter.put("/:id", userAuth, updateAppointment);
 appointmentRouter.delete("/:id", userAuth, deleteAppointment);
