@@ -60,7 +60,7 @@ const before = await Invoice.findOne({ appointment_id: APPT_ID }).exec();
 const beforeHasAddon = (before?.line_items ?? []).some((li: any) =>
   li.description?.includes("Test Add-on (paid)"),
 );
-console.log("BEFORE — invoice advance_paid:", before?.advance_paid, "| add-on line present:", beforeHasAddon);
+console.log("BEFORE - invoice advance_paid:", before?.advance_paid, "| add-on line present:", beforeHasAddon);
 
 // Act: complete the session (locks add-ons, clears recommendedServices, syncs).
 const { req, res } = makeReqRes();
@@ -78,15 +78,15 @@ const lockedHasAddon = (after?.locked_addon_items ?? []).some(
 );
 const advanceIncludesAddon = (after?.advance_paid ?? 0) >= 500;
 
-console.log("AFTER  — recommendedServices cleared:", (appt?.recommendedServices ?? []).length === 0);
-console.log("AFTER  — invoice advance_paid:", after?.advance_paid, "| add-on line present:", afterHasAddon, "| locked snapshot present:", lockedHasAddon);
+console.log("AFTER  - recommendedServices cleared:", (appt?.recommendedServices ?? []).length === 0);
+console.log("AFTER  - invoice advance_paid:", after?.advance_paid, "| add-on line present:", afterHasAddon, "| locked snapshot present:", lockedHasAddon);
 
 const pass =
   (appt?.recommendedServices ?? []).length === 0 &&
   afterHasAddon &&
   lockedHasAddon &&
   advanceIncludesAddon;
-console.log(pass ? "PASS — paid add-on preserved on the invoice after completion" : "FAIL — add-on billing was lost on completion");
+console.log(pass ? "PASS - paid add-on preserved on the invoice after completion" : "FAIL - add-on billing was lost on completion");
 
 // Cleanup: reset the test appointment to a clean baseline. Also strip the
 // test add-on from the invoice's locked_addon_items so re-runs stay isolated.

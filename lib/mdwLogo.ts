@@ -19,7 +19,7 @@ const D_PATH =
 
 /**
  * Draws the mdw mark at (x, y) with the given target width (points). Height is
- * derived from the source aspect ratio (~0.32 x width). Never throws — a logo
+ * derived from the source aspect ratio (~0.32 x width). Never throws - a logo
  * failure must not block invoice generation.
  */
 export function drawMdwLogo(
@@ -37,7 +37,7 @@ export function drawMdwLogo(
     doc.path(D_PATH).fill(BLUE);
     doc.circle(370.745, 109.182, 12.75).fill(NAVY);
   } catch {
-    // Ignore — the invoice is still valid without the mark.
+    // Ignore - the invoice is still valid without the mark.
   } finally {
     doc.restore();
   }

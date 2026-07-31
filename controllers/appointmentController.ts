@@ -19,7 +19,7 @@ import { createBooking } from "../lib/bookingService.ts";
 const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
 
 // Back-office roles that see every appointment / enquiry record.
-// THERAPIST is intentionally NOT in this set — therapists see only their
+// THERAPIST is intentionally NOT in this set - therapists see only their
 // own assigned records (filtered by doctorId).
 const BACK_OFFICE_ROLES = new Set([
     "SUPER_ADMIN",
@@ -37,8 +37,8 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
             email: (req.user as any)?.userEmail,
         };
 
-        // All creation logic — validation, ID allocation, customer linkage, and
-        // invoice generation — lives in the one createBooking() service, so this
+        // All creation logic - validation, ID allocation, customer linkage, and
+        // invoice generation - lives in the one createBooking() service, so this
         // dashboard path and the public path can never drift apart again.
         const result = await createBooking(req.body, {
             source: "dashboard",
@@ -68,7 +68,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
 export const getAllAppointments = async (req: Request, res: Response) => {
     try {
         // Trust the server-verified user from JWT (set by userAuth middleware),
-        // NOT the client-supplied ?role= query param — that was spoofable and
+        // NOT the client-supplied ?role= query param - that was spoofable and
         // also broke for back-office roles other than SUPER_ADMIN.
         const role = req.user?.role;
         const userEmail = req.user?.userEmail;
@@ -453,7 +453,7 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
       !appt.visitOtpExpiresAt ||
       appt.visitOtpExpiresAt < new Date()
     ) {
-      return res.status(400).send({ success: false, message: "No active code — send a new one." });
+      return res.status(400).send({ success: false, message: "No active code - send a new one." });
     }
     const ok = await bcrypt.compare(String(code ?? "").trim(), appt.visitOtpHash);
     if (!ok) {
@@ -497,13 +497,13 @@ export const completeSession = async (req: Request, res: Response) => {
                 ? await Service.findOne({ name: existing.service }).exec()
                 : null;
         // Total visits: a catalogue package's count, else an ad-hoc booking's
-        // stable session count (totalSessions). sessionNumber is NOT used — it's
+        // stable session count (totalSessions). sessionNumber is NOT used - it's
         // repurposed below as the current-session pointer.
         const total =
             service?.packageCount ?? existing.totalSessions ?? 1;
 
         // Ceiling guard: never complete past the package total. Atomic conditional
-        // increment — only bumps when the current count (0 if the field is missing)
+        // increment - only bumps when the current count (0 if the field is missing)
         // is still below `total`; returns null if the package is already complete.
         // This enforces the ceiling AND stays correct under concurrent completions
         // (the server, not the client, decides the count).
@@ -520,10 +520,10 @@ export const completeSession = async (req: Request, res: Response) => {
             { new: true },
         ).exec();
         if (!bumped) {
-            // Already at/over the total — there is no session left to complete.
+            // Already at/over the total - there is no session left to complete.
             return res.status(409).send({
                 success: false,
-                message: `Package already complete — all ${total} sessions done`,
+                message: `Package already complete - all ${total} sessions done`,
                 data: existing,
             });
         }
@@ -540,8 +540,8 @@ export const completeSession = async (req: Request, res: Response) => {
             userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
             name: actorName,
             action: done
-                ? `Package complete — all ${total} sessions done`
-                : `Session ${sessionsDone} of ${total} completed — schedule next visit`,
+                ? `Package complete - all ${total} sessions done`
+                : `Session ${sessionsDone} of ${total} completed - schedule next visit`,
         };
 
         const actor = {
@@ -549,7 +549,7 @@ export const completeSession = async (req: Request, res: Response) => {
             email: (req.user as any)?.userEmail,
         };
 
-        // Snapshot confirmed add-ons onto the invoice ledger — belt-and-suspenders:
+        // Snapshot confirmed add-ons onto the invoice ledger - belt-and-suspenders:
         // add-ons now stay on the row too, but this guarantees the invoice keeps
         // them even if the row is later edited. A lock failure must not fail the
         // completion.
@@ -571,7 +571,7 @@ export const completeSession = async (req: Request, res: Response) => {
             {
                 status: done ? "completed" : "scheduled",
                 ...(done ? { completedAt: new Date() } : { sessionNumber: sessionsDone + 1 }),
-                // Add-ons are NOT cleared — they stay on the row (shown with a
+                // Add-ons are NOT cleared - they stay on the row (shown with a
                 // check once confirmed) so they never vanish. Only the per-visit
                 // checklist (arrived/performed/completed) resets for next visit.
                 workChecklist: [],
@@ -624,7 +624,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
         // Server-managed fields are owned by the visit-OTP + complete-session
         // endpoints and are NEVER settable via a client update. The work checklist
         // echoes the WHOLE draft on every checkbox save, so without this a stale
-        // draft silently clobbers them — notably undoing a fresh OTP verification
+        // draft silently clobbers them - notably undoing a fresh OTP verification
         // (which then wrongly blocked checkout).
         delete (updateData as any).visitOtpHash;
         delete (updateData as any).visitOtpExpiresAt;
@@ -642,7 +642,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
 
         // ── Actor: from the verified JWT (userAuth), never the client body. ──
         // Login stores user.id = User._id, and reachedOutBy.userId is set to that
-        // same id on the frontend — so this ownership comparison is sound.
+        // same id on the frontend - so this ownership comparison is sound.
         const user = req.user as any;
         const actorId = String(user?._id ?? user?.id ?? "");
         const actorName = user?.userfName
@@ -656,7 +656,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
         const isOwner = !!ownerId && !!actorId && ownerId === actorId;
         const nonOwnerExec = !!ownerId && !isOwner && !isAdmin;
 
-        // Reason travels in overrideReason (T3/T5) / reassignReason (T4) — not columns.
+        // Reason travels in overrideReason (T3/T5) / reassignReason (T4) - not columns.
         const reason = String(
             req.body.overrideReason ?? req.body.reassignReason ?? "",
         ).trim();
@@ -667,7 +667,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
             updateData.doctorId !== undefined &&
             (updateData.doctorId ?? "") !== (cur.doctorId ?? "");
         const reassigningTherapist = changingTherapist && !!cur.doctorId;
-        // Only changing FROM an existing owner TO a different one is gated —
+        // Only changing FROM an existing owner TO a different one is gated -
         // claiming an unclaimed lead stays free.
         const newOwnerId = updateData.reachedOutBy?.userId ?? "";
         const changingOwner = !!ownerId && !!newOwnerId && newOwnerId !== ownerId;
@@ -693,7 +693,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
 
         // ── Pay-before-therapist gate (a money rule, not a permission). A
         // therapist may not be assigned to an unpaid booking. The drawer disables
-        // the control, but that is only a courtesy — enforce it server-side so a
+        // the control, but that is only a courtesy - enforce it server-side so a
         // direct API call or a UI slip can't skip payment. Applies to everyone;
         // an exception just means recording the payment first. (report §3.1) ──
         const assigningTherapist =
@@ -713,13 +713,13 @@ export const updateAppointment = async (req: Request, res: Response) => {
         if (nonOwnerExec) {
             entries.push({
                 at: now, userId: actorId, name: actorName,
-                action: `Edited ${ownerName}'s lead — reason: ${reason}`,
+                action: `Edited ${ownerName}'s lead - reason: ${reason}`,
             });
         }
         if (reassigningTherapist) {
             entries.push({
                 at: now, userId: actorId, name: actorName,
-                action: `Therapist reassigned (${cur.doctorId} → ${updateData.doctorId})${reason ? ` — reason: ${reason}` : ""}`,
+                action: `Therapist reassigned (${cur.doctorId} → ${updateData.doctorId})${reason ? ` - reason: ${reason}` : ""}`,
             });
         }
         if (reason && !updateData.statusNote) updateData.statusNote = reason;
@@ -771,7 +771,7 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 
 // Writes: a real person fills this form once. Tight, to blunt spam.
 const ENQUIRY_LIMIT_PER_MINUTE = 5;
-// Reads: idempotent, no side effects, and already guarded by a 2^128 token —
+// Reads: idempotent, no side effects, and already guarded by a 2^128 token -
 // the limit here is only anti-hammering. It must be generous: Indian mobile
 // carriers run CGNAT, so MANY paying customers share one public IP and a tight
 // limit would have them 429 each other out of paying.
@@ -835,7 +835,7 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             status: "enquiry",
         };
 
-        // Same createBooking() service the dashboard uses — so a public lead now
+        // Same createBooking() service the dashboard uses - so a public lead now
         // gets the SAME customer linkage + invoice handling + guards. Repeat
         // folding stays on for the public form.
         const result = await createBooking(input, {
@@ -853,7 +853,7 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             return res.status(200).send({
                 success: true,
                 message:
-                    "Thanks! We already have your enquiry — our team will reach out, and we've noted your latest details.",
+                    "Thanks! We already have your enquiry - our team will reach out, and we've noted your latest details.",
                 data: {
                     enquiryId: result.appointment.enquiryId,
                     repeatCount: result.repeatCount,
@@ -863,21 +863,21 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
 
         return res.status(201).send({
             success: true,
-            message: "Booking received — our team will reach out shortly.",
+            message: "Booking received - our team will reach out shortly.",
             data: { enquiryId: result.appointment.enquiryId },
         });
     } catch (error: any) {
         console.error("[addPublicEnquiry]", error);
         return res.status(500).send({
             success: false,
-            message: "Server error — please try again.",
+            message: "Server error - please try again.",
         });
     }
 };
 
 // ── Payment link ──────────────────────────────────────────────────────────────
 // Mint the unguessable token behind this booking's public /pay/<token> page.
-// The TOKEN IS MINTED SERVER-SIDE ON PURPOSE — never let the client choose it,
+// The TOKEN IS MINTED SERVER-SIDE ON PURPOSE - never let the client choose it,
 // or a buggy/hostile caller could set a predictable one and expose customers.
 // Idempotent: re-requesting payment returns the same token, so a link already
 // sent to a customer keeps working.
@@ -904,7 +904,7 @@ export const createPaymentLink = async (req: Request, res: Response) => {
         console.error("[createPaymentLink]", error);
         return res
             .status(500)
-            .send({ success: false, message: "Server error — please try again." });
+            .send({ success: false, message: "Server error - please try again." });
     }
 };
 
@@ -923,7 +923,7 @@ export const getPublicPaymentSummary = async (req: Request, res: Response) => {
         }
 
         const token = String(req.params.token ?? "");
-        // Tokens are 32 hex chars — anything shorter is a probe, not a typo.
+        // Tokens are 32 hex chars - anything shorter is a probe, not a typo.
         // Bail before touching the database.
         if (!/^[a-f0-9]{32}$/.test(token)) {
             return res
@@ -953,6 +953,6 @@ export const getPublicPaymentSummary = async (req: Request, res: Response) => {
         console.error("[getPublicPaymentSummary]", error);
         return res
             .status(500)
-            .send({ success: false, message: "Server error — please try again." });
+            .send({ success: false, message: "Server error - please try again." });
     }
 };

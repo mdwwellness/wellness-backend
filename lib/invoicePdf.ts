@@ -14,7 +14,7 @@ const BRAND = {
   legalName: "My Dawai Wala Healthcare Services",
 };
 
-// Wellness palette — sourced from the client site's --mdw-blue brand token.
+// Wellness palette - sourced from the client site's --mdw-blue brand token.
 const COLORS = {
   primary: "#018bc4",
   primaryDark: "#016a97",
@@ -57,8 +57,8 @@ function bufferFromPdfDocument(doc: PDFKit.PDFDocument): Promise<Buffer> {
 }
 
 function formatINR(amount: number): string {
-  // pdfkit's built-in Helvetica has no rupee glyph (U+20B9) — it would render
-  // as a blank box — so use a plain "Rs." prefix that renders reliably.
+  // pdfkit's built-in Helvetica has no rupee glyph (U+20B9) - it would render
+  // as a blank box - so use a plain "Rs." prefix that renders reliably.
   const n = new Intl.NumberFormat("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -152,7 +152,7 @@ function drawKeyValue(
     .fillColor(COLORS.text)
     .font("Helvetica-Bold")
     .fontSize(10)
-    .text(value || "—", x + lw, y, { width: Math.max(20, width - lw), lineBreak: false });
+    .text(value || "-", x + lw, y, { width: Math.max(20, width - lw), lineBreak: false });
   return y + 16;
 }
 

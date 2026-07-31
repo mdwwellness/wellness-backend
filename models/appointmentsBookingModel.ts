@@ -36,7 +36,7 @@ const AppointmentBookingSchema = new Schema({
         type: String,
     },
     // ── Therapy session package (catalogue serviceId, e.g. SRV-0003). ──
-    //    Used for "2 of 6 sessions completed" progress — separate from `service`
+    //    Used for "2 of 6 sessions completed" progress - separate from `service`
     //    which tracks the public-site funnel offering. ──
     packageServiceId: {
         type: String,
@@ -93,7 +93,7 @@ const AppointmentBookingSchema = new Schema({
         to: { type: String },
     },
 
-    // ── NEW: funnel checkpoint — executive reach-out ──
+    // ── NEW: funnel checkpoint - executive reach-out ──
     executiveReachedOut: {
         type: Boolean,
         default: false,
@@ -102,7 +102,7 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
-    // ── NEW: funnel checkpoint — online consultation ──
+    // ── NEW: funnel checkpoint - online consultation ──
     consultationSlot: {
         date: { type: String },
         time: { type: String },
@@ -115,7 +115,7 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
-    // ── NEW: funnel checkpoint — physio assignment ──
+    // ── NEW: funnel checkpoint - physio assignment ──
     physioSlot: {
         date: { type: String },
         time: { type: String },
@@ -164,7 +164,7 @@ const AppointmentBookingSchema = new Schema({
     //    booked a slot or otherwise advanced the funnel). Different from
     //    assignedTo (which is the current owner and can be reassigned).
     //    reachedOutBy is set once on first action and is intended to be
-    //    immutable in the dashboard UI for non-admin users — only admins
+    //    immutable in the dashboard UI for non-admin users - only admins
     //    can override via the drawer. Backend doesn't enforce immutability;
     //    that's a frontend concern. ──
     reachedOutBy: {
@@ -191,7 +191,7 @@ const AppointmentBookingSchema = new Schema({
     // ── Public payment link ──
     //    Unguessable token backing the customer-facing /pay/<token> page.
     //    Minted on demand when an executive requests payment (most records
-    //    never get one — hence sparse). NEVER derive this from enquiryId:
+    //    never get one - hence sparse). NEVER derive this from enquiryId:
     //    those are sequential and would let anyone enumerate other customers.
     payToken: {
         type: String,
@@ -200,7 +200,7 @@ const AppointmentBookingSchema = new Schema({
         index: true,
     },
 
-    // ── Funnel checkpoint — payment (patient → clinic) ──
+    // ── Funnel checkpoint - payment (patient → clinic) ──
     paymentReceived: {
         type: Boolean,
         default: false,
@@ -223,16 +223,16 @@ const AppointmentBookingSchema = new Schema({
     visitOtpExpiresAt: { type: Date },
     visitOtpVerified: { type: Boolean, default: false },
 
-    // ── Funnel checkpoint — completion ──
+    // ── Funnel checkpoint - completion ──
     completedAt: {
         type: Date,
     },
 
-    // ── Therapist work checklist — completed item keys
+    // ── Therapist work checklist - completed item keys
     //    (e.g. "arrived", "performed", "payment", "completed"). ──
     workChecklist: [{ type: String }],
 
-    // Per-session report log — one entry snapshotted on each session completion
+    // Per-session report log - one entry snapshotted on each session completion
     // so a multi-session booking keeps every visit's note separately.
     sessionNotes: [
         {
@@ -282,7 +282,7 @@ const AppointmentBookingSchema = new Schema({
         type: Number,
     },
     // The originating appointment's _id when this was created via "Recommend a
-    // service" (legacy — new flow stacks on recommendedServices instead).
+    // service" (legacy - new flow stacks on recommendedServices instead).
     recommendedFrom: {
         type: String,
     },

@@ -62,7 +62,7 @@ export const getServices = async (_req: Request, res: Response) => {
 export const updateService = async (req: Request, res: Response) => {
     try {
         const { serviceId } = req.params;
-        // serviceId is immutable — never let the body overwrite it.
+        // serviceId is immutable - never let the body overwrite it.
         const { serviceId: _ignore, ...updateData } = req.body;
 
         if (packageFieldsInvalid(updateData)) {
@@ -124,7 +124,7 @@ export const deleteService = async (req: Request, res: Response) => {
             const more = totalCount > 6 ? ` +${totalCount - 6} more` : "";
             return res.status(409).send({
                 success: false,
-                message: `Cannot delete — used by ${totalCount} record(s): ${preview}${more}. Remove or reassign these first.`,
+                message: `Cannot delete - used by ${totalCount} record(s): ${preview}${more}. Remove or reassign these first.`,
                 blockedBy: { appointments: bookingIds, invoices: invoiceIds },
             });
         }

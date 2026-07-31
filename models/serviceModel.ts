@@ -18,7 +18,7 @@ const serviceSchema = new Schema(
         description: {
             type: String,
         },
-        // ── T31 pricing — the service's two prices (used when added to a visit) ──
+        // ── T31 pricing - the service's two prices (used when added to a visit) ──
         // discountedPrice when a therapist recommends it + discount applied, else originalPrice.
         originalPrice: { type: Number, min: 0 },
         discountedPrice: { type: Number, min: 0 },

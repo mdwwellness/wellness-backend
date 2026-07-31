@@ -108,7 +108,7 @@ export async function updateInvoice(req: Request, res: Response) {
     const itemsSubtotal = invoice.line_items.reduce((sum: number, li: any) => sum + (li.price ?? 0), 0);
     invoice.items_subtotal = itemsSubtotal;
     invoice.total = itemsSubtotal;
-    // Never show a negative balance — an overpayment/prepaid package reads as
+    // Never show a negative balance - an overpayment/prepaid package reads as
     // "paid in full", not a negative number.
     invoice.balance_due = Math.max(0, invoice.total - (invoice.advance_paid ?? 0));
 

@@ -18,5 +18,5 @@ assert.equal(
 );
 
 // With payment cleared, the gate lets it through (it would then proceed to the
-// DB, so we don't execute that path here — the gate is what we're testing).
+// DB, so we don't execute that path here - the gate is what we're testing).
 console.log("PASS: createBooking pay-gate rejects unpaid therapist assignment");

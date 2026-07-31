@@ -29,7 +29,7 @@ const allowedOrigins = [
 
 // Any localhost / 127.0.0.1 port is allowed for local dev (e.g. dashboard on
 // :3000, patient site on :3003). The browser sets Origin, so only pages truly
-// served from localhost match — safe to allow.
+// served from localhost match - safe to allow.
 const isLocalhost = (origin: string) =>
   /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
@@ -39,7 +39,7 @@ app.use(
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      // No Origin header = same-origin / server-to-server (e.g. curl) — allow.
+      // No Origin header = same-origin / server-to-server (e.g. curl) - allow.
       if (!origin || isLocalhost(origin) || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -81,7 +81,7 @@ const connect = async () => {
       process.env.DATABASE_URL || "mongodb://127.0.0.1:27017/test",
     );
   } catch (error) {
-    logger.error("MongoDB initial connection failed — exiting", error);
+    logger.error("MongoDB initial connection failed - exiting", error);
     process.exit(1);
   }
 };

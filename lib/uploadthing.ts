@@ -8,7 +8,7 @@ function getUtapi(): UTApi {
     if (!token) {
       throw new Error(
         "Missing env var UPLOADTHING_TOKEN on the backend server (WellnessBackend .env). " +
-          "The frontend .env.local token is not shared automatically — copy UPLOADTHING_TOKEN there and restart the API.",
+          "The frontend .env.local token is not shared automatically - copy UPLOADTHING_TOKEN there and restart the API.",
       );
     }
     utapi = new UTApi({ token });
