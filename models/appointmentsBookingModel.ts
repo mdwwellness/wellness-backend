@@ -46,6 +46,15 @@ const AppointmentBookingSchema = new Schema({
         type: Number,
     },
     // Completed sessions in this package on this single appointment row.
+    // What was sold: a one-off intake (online consultation / home visit) or a
+    // course of therapy sessions. Without this the two are indistinguishable -
+    // a course is always delivered at home, so typeOfappointment alone cannot
+    // tell a Home Visit intake from a course of home sessions.
+    bookingKind: {
+        type: String,
+        enum: ["intake", "course"],
+    },
+
     // Stable total number of visits for an ad-hoc (modal) multi-session booking.
     // Catalogue packages get their total from the service's packageCount instead;
     // sessionNumber is the moving current-session pointer, so it can't hold this.

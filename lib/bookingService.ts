@@ -103,6 +103,17 @@ export async function createBooking(
     };
   }
 
+  // An unpriced booking generates NO invoice at all, so it would silently never
+  // bill. Self-gating the same way: only fires once a therapist is on the
+  // payload, so a bare public enquiry (price legitimately unknown) still passes.
+  if (input.doctorId && !(Number(input.quotedPrice) > 0)) {
+    return {
+      ok: false,
+      code: 400,
+      message: "Set the booking price before assigning a therapist.",
+    };
+  }
+
   // Repeat folding for open leads (opt-in).
   if (opts.foldOpenRepeats) {
     // Fold only a TRUE repeat: same phone AND same person. A different name on

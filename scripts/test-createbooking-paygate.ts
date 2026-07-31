@@ -17,6 +17,25 @@ assert.equal(
   "Record the payment before assigning a therapist.",
 );
 
+// Paid but unpriced must also be rejected: an unpriced booking generates no
+// invoice at all, so it would silently never bill. Also returns before any DB call.
+const unpriced = await createBooking(
+  {
+    name: "Price Gate Test",
+    phonenumber: 9999999999,
+    doctorId: "THR-0001",
+    paymentReceived: true,
+  },
+  { source: "test" },
+);
+assert.equal(unpriced.ok, false, "paid but unpriced should be rejected");
+assert.equal((unpriced as any).code, 400);
+assert.equal(
+  (unpriced as any).message,
+  "Set the booking price before assigning a therapist.",
+);
+
 // With payment cleared, the gate lets it through (it would then proceed to the
 // DB, so we don't execute that path here - the gate is what we're testing).
 console.log("PASS: createBooking pay-gate rejects unpaid therapist assignment");
+console.log("PASS: createBooking price-gate rejects unpriced therapist assignment");
