@@ -1,12 +1,12 @@
 import mongoose, { Schema } from "mongoose";
 
 /**
- * Global session-rate table (T31) — a single document holding an ordered list
+ * Global session-rate table (T31) - a single document holding an ordered list
  * of tiers. A course of N sessions is priced by the tier whose [from, to] range
  * contains N (`to: null` = "from and above"), at `rate` per session.
  *
- * The tiers are fully user-defined and editable (add/remove rows, any ranges) —
- * this model imposes no fixed 1–5 / 6–10 bands.
+ * The tiers are fully user-defined and editable (add/remove rows, any ranges) -
+ * this model imposes no fixed 1-5 / 6-10 bands.
  */
 const tierSchema = new Schema(
     {

@@ -14,7 +14,7 @@ await mongoose.connect(process.env.DATABASE_URL!);
 // will observe its own post-increment count as 5 (done=false), the second
 // will observe 6 (done=true). Before the fix, whichever request's second
 // write executed last would win regardless of which was actually the true
-// final state — so "scheduled" could beat "completed" even though the real
+// final state - so "scheduled" could beat "completed" even though the real
 // count says the package is done.
 await AppointmentBooking.findByIdAndUpdate(id, {
   packageServiceId: "SRV-0002",

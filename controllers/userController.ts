@@ -18,7 +18,7 @@ const generateRefreshToken = (userId: string) => {
     { id: userId },
     process.env.JWT_REFRESH_SECRET || "vivo123refresh",
     {
-      expiresIn: "7d", // Long-lived refresh token
+      expiresIn: "30d", // Long-lived refresh token - keeps the session ~1 month
     },
   );
 };
@@ -91,7 +91,7 @@ export const login = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 Days
     });
 
     res.status(200).json({
@@ -118,7 +118,7 @@ export const login = async (req: Request, res: Response) => {
   }
 };
 
-// Forgot password — step 1: email a 6-digit code (hashed + 10-min expiry).
+// Forgot password - step 1: email a 6-digit code (hashed + 10-min expiry).
 export const forgotPassword = async (req: Request, res: Response) => {
   try {
     const { userEmail } = req.body;
@@ -150,7 +150,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
   }
 };
 
-// Forgot password — step 2: verify the code and set a new password.
+// Forgot password - step 2: verify the code and set a new password.
 export const resetPassword = async (req: Request, res: Response) => {
   try {
     const { userEmail, otp, newPassword } = req.body;
@@ -175,7 +175,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     if (user.passwordResetOTPExpires.getTime() < Date.now()) {
       return res.status(400).json({
         success: false,
-        message: "This code has expired — request a new one.",
+        message: "This code has expired - request a new one.",
       });
     }
     const ok = await bcrypt.compare(String(otp).trim(), user.passwordResetOTP);
@@ -313,7 +313,7 @@ export const adminEditUserProfile = async (req: Request, res: Response) => {
     const roleChanged = role !== undefined && role !== user.role;
     const isAdminRole = (r: string) => r === "SUPER_ADMIN" || r === "ADMIN";
 
-    // Don't demote the last remaining admin — that orphans user management.
+    // Don't demote the last remaining admin - that orphans user management.
     if (roleChanged && isAdminRole(user.role) && !isAdminRole(role)) {
       const adminCount = await User.countDocuments({
         role: { $in: ["SUPER_ADMIN", "ADMIN"] },
@@ -363,7 +363,7 @@ export const adminEditUserProfile = async (req: Request, res: Response) => {
       user.userPassword = userPassword; // re-hashed by the model's pre-save hook
     }
 
-    // A role change invalidates the target's session — force a fresh login so
+    // A role change invalidates the target's session - force a fresh login so
     // the new permissions take effect immediately.
     if (roleChanged) user.refreshToken = "";
 
@@ -563,7 +563,7 @@ export const deleteUser = async (req:Request, res:Response) => {
       return res.status(400).json({ message: "User ID required" });
     }
 
-    // Can't delete yourself — an admin locking themselves out mid-action.
+    // Can't delete yourself - an admin locking themselves out mid-action.
     const requesterId = String(
       (req.user as any)?._id ?? (req.user as any)?.id ?? "",
     );
@@ -578,7 +578,7 @@ export const deleteUser = async (req:Request, res:Response) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Don't allow deleting the last remaining admin — that would orphan the
+    // Don't allow deleting the last remaining admin - that would orphan the
     // system with no one able to manage users.
     if (target.role === "SUPER_ADMIN" || target.role === "ADMIN") {
       const adminCount = await User.countDocuments({

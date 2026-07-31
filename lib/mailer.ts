@@ -4,12 +4,12 @@ import type { Transporter } from "nodemailer";
 /**
  * SMTP mailer. Configure via env vars:
  *   SMTP_HOST   e.g. smtp.gmail.com
- *   SMTP_PORT   587 (STARTTLS) or 465 (SSL) — defaults to 587
+ *   SMTP_PORT   587 (STARTTLS) or 465 (SSL) - defaults to 587
  *   SMTP_USER   the sending account (e.g. your Gmail address)
  *   SMTP_PASS   an App Password (for Gmail: a 16-char app password, NOT the login password)
  *   MAIL_FROM   optional display From (defaults to SMTP_USER)
  *
- * Nothing sends until these are set — sendMail throws a clear error otherwise.
+ * Nothing sends until these are set - sendMail throws a clear error otherwise.
  */
 let transporter: Transporter | null = null;
 
@@ -18,7 +18,7 @@ function getTransporter(): Transporter {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
     throw new Error(
-      "Email is not configured — set SMTP_HOST, SMTP_USER and SMTP_PASS in the backend .env.",
+      "Email is not configured - set SMTP_HOST, SMTP_USER and SMTP_PASS in the backend .env.",
     );
   }
   const port = Number(SMTP_PORT ?? 587);

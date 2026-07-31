@@ -76,7 +76,7 @@ export async function ensureCustomerForAppointment(
 
   // Backfill the customer ID onto the appointment doc so every appointment
   // carries its own customer_id (visible in the dashboard without a phone join).
-  // Only when passed a live document — manual invoices pass plain objects.
+  // Only when passed a live document - manual invoices pass plain objects.
   try {
     if (
       appointment &&
@@ -144,7 +144,7 @@ function deriveInvoiceType(
     return "therapy_addon_standalone";
   }
 
-  // A therapy PACKAGE that's been chosen/paid is package billing — even if an
+  // A therapy PACKAGE that's been chosen/paid is package billing - even if an
   // online consultation happened earlier in the funnel. This must be checked
   // BEFORE the consultation signals, otherwise a Home-Therapy package whose
   // lead had a consultation gets mislabelled "online_consultation".
@@ -229,11 +229,11 @@ function mergeAddonItems(
 const CONSULT_FEE = 500;
 
 /**
- * Whether this appointment consumed a billable ONLINE CONSULTATION — a paid
+ * Whether this appointment consumed a billable ONLINE CONSULTATION - a paid
  * session where the customer talks to a therapist about their issue.
  *
  * NOT the same as the executive reach-out (a free scheduling call), and NOT the
- * free intake/"consultation call" a Home Therapy / Vitals lead has — those are
+ * free intake/"consultation call" a Home Therapy / Vitals lead has - those are
  * never charged. Only genuine "Online Consultation" leads pay the ₹500.
  */
 function hasConsultationCharge(appointment: any): boolean {
@@ -252,7 +252,7 @@ function hasConsultationCharge(appointment: any): boolean {
 /**
  * Price for an appointment's main line item.
  *
- * The FRONTEND is the pricing authority — it computes sessions × rate-table
+ * The FRONTEND is the pricing authority - it computes sessions × rate-table
  * tier (+ add-ons) and sends `quotedPrice`. The service catalogue is only a
  * fallback for records that never carried an explicit price.
  *
@@ -272,21 +272,21 @@ function resolveMainPrice(appointment: any, service?: any): number | null {
 }
 
 // Mirror of the frontend BOOKING_TYPES (src/components/pages/enquiries/booking.ts).
-// KEEP IN SYNC — two values. The confirmed booking type is the billing truth.
+// KEEP IN SYNC - two values. The confirmed booking type is the billing truth.
 const BOOKING_TYPE_SERVICE: Record<string, string> = {
   consultation: "Online Consultation",
   appointment: "Home Visit Consultation",
 };
 
 // Records that came through the public-site enquiry funnel carry one of these
-// as `service`. ONLY those get the confirmed-booking-type label above — a
+// as `service`. ONLY those get the confirmed-booking-type label above - a
 // session booked via the dashboard's "Book Appointment" form also has
 // typeOfappointment:"appointment" but means "a session", not a home visit.
 const ENQUIRY_OFFERINGS = new Set(["Online Consultation", "Home Therapy", "Vitals Check"]);
 
 /**
  * Itemised breakdown of everything the customer consumed on this appointment:
- *   1. The main line item — the executive-confirmed booking type
+ *   1. The main line item - the executive-confirmed booking type
  *      (`typeOfappointment`) when present, since that's the pay-first funnel's
  *      billing truth; otherwise the legacy consultation/package/standalone-
  *      therapy logic (pre-dates the confirmed-type field).
@@ -310,7 +310,7 @@ async function buildLineItemsFromAppointment(
       : undefined;
 
   if (confirmedService) {
-    // Pay-first funnel: the executive-confirmed booking type is authoritative —
+    // Pay-first funnel: the executive-confirmed booking type is authoritative -
     // NOT the stale `service` the customer first asked for on the public site.
     line_items.push({
       description: confirmedService,
@@ -335,7 +335,7 @@ async function buildLineItemsFromAppointment(
     }
   }
 
-  // Add-ons (confirmed live + locked-on-invoice, deduped) — appended in all paths.
+  // Add-ons (confirmed live + locked-on-invoice, deduped) - appended in all paths.
   for (const addon of mergeAddonItems(appointment, lockedAddonItems)) {
     line_items.push({ description: addon.description, price: addon.price });
   }
@@ -373,7 +373,7 @@ async function createInvoiceFromAppointment(args: {
 
   const items_subtotal = line_items.reduce((sum, li) => sum + safeNumber(li.price), 0);
 
-  // Nothing could price this appointment — no quotedPrice, no paymentAmount and
+  // Nothing could price this appointment - no quotedPrice, no paymentAmount and
   // no catalogue price. Refuse rather than bill ₹0: a phantom invoice would burn
   // a GST-sequential INV number that can never be reused.
   if (!line_items.length || items_subtotal <= 0) {
@@ -489,7 +489,7 @@ export async function syncInvoiceFromAppointment(args: {
     return maybeCreateInvoiceForAppointment({ appointment, actor });
   }
 
-  // A voided invoice is a frozen audit record — nothing re-derives it.
+  // A voided invoice is a frozen audit record - nothing re-derives it.
   if (existing.voided) return existing;
 
   // ── The money is frozen once the invoice is paid ──
@@ -498,11 +498,11 @@ export async function syncInvoiceFromAppointment(args: {
   // customer has already paid against (e.g. an executive edits the fee in the
   // enquiry drawer after payment). A real change to a settled invoice goes
   // through void + reissue, not a silent rewrite. Non-money FACTS still sync
-  // below — under the pay-first funnel the therapist is assigned AFTER payment,
+  // below - under the pay-first funnel the therapist is assigned AFTER payment,
   // so a paid invoice must still be able to pick up its doctor.
   const wasPaid = existing.payment_status === "paid";
 
-  // Backfill customer_id onto the appointment on the update path too — the
+  // Backfill customer_id onto the appointment on the update path too - the
   // create path already does this via maybeCreate. Idempotent (keyed by phone).
   await ensureCustomerForAppointment(appointment);
 
@@ -559,7 +559,7 @@ export async function syncInvoiceFromAppointment(args: {
     existing.balance_due = balance_due;
     existing.payment_status = payment_status;
   }
-  // Non-money facts sync either way — an invoice created before the physio was
+  // Non-money facts sync either way - an invoice created before the physio was
   // assigned would otherwise never show a therapist.
   existing.therapist_name = appointment.doctor || existing.therapist_name;
   (existing as any).therapist_id =
@@ -574,7 +574,7 @@ export async function syncInvoiceFromAppointment(args: {
 
   // Only re-issue the PDF when something it actually shows has changed. For an
   // open invoice that's anything (it re-derives freely); for a paid one it's
-  // just the synced facts (therapist/session) — so a no-op appointment save no
+  // just the synced facts (therapist/session) - so a no-op appointment save no
   // longer churns pdf_url or hammers UploadThing on a settled invoice.
   const pdfVisibleChanged =
     !wasPaid ||
@@ -602,7 +602,7 @@ export async function syncInvoiceFromAppointment(args: {
   return existing;
 }
 
-/** Same as syncInvoiceFromAppointment, but never throws — logs and returns null on failure. */
+/** Same as syncInvoiceFromAppointment, but never throws - logs and returns null on failure. */
 export async function safeSyncInvoiceFromAppointment(args: {
   appointment: any;
   actor?: Actor;
@@ -641,7 +641,7 @@ export async function lockConfirmedAddonsToInvoice(args: {
     appointment_id: appointment._id,
   }).exec();
   if (!invoice) {
-    // No invoice yet — create one from the appointment while it still carries
+    // No invoice yet - create one from the appointment while it still carries
     // the add-ons, so the invoice is fully formed before we lock.
     invoice = await maybeCreateInvoiceForAppointment({ appointment, actor });
     if (!invoice) return;

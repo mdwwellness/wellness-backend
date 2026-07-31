@@ -175,7 +175,7 @@ export async function deleteDoctor(req: Request, res: Response) {
     if (appointmentCount > 0) {
       return res.status(409).json({
         success: false,
-        message: `Cannot delete — this therapist has ${appointmentCount} appointment(s).`,
+        message: `Cannot delete - this therapist has ${appointmentCount} appointment(s).`,
       });
     }
 

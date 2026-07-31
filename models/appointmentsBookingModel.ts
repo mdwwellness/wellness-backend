@@ -36,7 +36,7 @@ const AppointmentBookingSchema = new Schema({
         type: String,
     },
     // ── Therapy session package (catalogue serviceId, e.g. SRV-0003). ──
-    //    Used for "2 of 6 sessions completed" progress — separate from `service`
+    //    Used for "2 of 6 sessions completed" progress - separate from `service`
     //    which tracks the public-site funnel offering. ──
     packageServiceId: {
         type: String,
@@ -46,6 +46,21 @@ const AppointmentBookingSchema = new Schema({
         type: Number,
     },
     // Completed sessions in this package on this single appointment row.
+    // What was sold: a one-off intake (online consultation / home visit) or a
+    // course of therapy sessions. Without this the two are indistinguishable -
+    // a course is always delivered at home, so typeOfappointment alone cannot
+    // tell a Home Visit intake from a course of home sessions.
+    bookingKind: {
+        type: String,
+        enum: ["intake", "course"],
+    },
+
+    // Stable total number of visits for an ad-hoc (modal) multi-session booking.
+    // Catalogue packages get their total from the service's packageCount instead;
+    // sessionNumber is the moving current-session pointer, so it can't hold this.
+    totalSessions: {
+        type: Number,
+    },
     sessionsCompleted: {
         type: Number,
         default: 0,
@@ -87,7 +102,7 @@ const AppointmentBookingSchema = new Schema({
         to: { type: String },
     },
 
-    // ── NEW: funnel checkpoint — executive reach-out ──
+    // ── NEW: funnel checkpoint - executive reach-out ──
     executiveReachedOut: {
         type: Boolean,
         default: false,
@@ -96,7 +111,7 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
-    // ── NEW: funnel checkpoint — online consultation ──
+    // ── NEW: funnel checkpoint - online consultation ──
     consultationSlot: {
         date: { type: String },
         time: { type: String },
@@ -109,7 +124,7 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
-    // ── NEW: funnel checkpoint — physio assignment ──
+    // ── NEW: funnel checkpoint - physio assignment ──
     physioSlot: {
         date: { type: String },
         time: { type: String },
@@ -158,7 +173,7 @@ const AppointmentBookingSchema = new Schema({
     //    booked a slot or otherwise advanced the funnel). Different from
     //    assignedTo (which is the current owner and can be reassigned).
     //    reachedOutBy is set once on first action and is intended to be
-    //    immutable in the dashboard UI for non-admin users — only admins
+    //    immutable in the dashboard UI for non-admin users - only admins
     //    can override via the drawer. Backend doesn't enforce immutability;
     //    that's a frontend concern. ──
     reachedOutBy: {
@@ -185,7 +200,7 @@ const AppointmentBookingSchema = new Schema({
     // ── Public payment link ──
     //    Unguessable token backing the customer-facing /pay/<token> page.
     //    Minted on demand when an executive requests payment (most records
-    //    never get one — hence sparse). NEVER derive this from enquiryId:
+    //    never get one - hence sparse). NEVER derive this from enquiryId:
     //    those are sequential and would let anyone enumerate other customers.
     payToken: {
         type: String,
@@ -194,7 +209,7 @@ const AppointmentBookingSchema = new Schema({
         index: true,
     },
 
-    // ── Funnel checkpoint — payment (patient → clinic) ──
+    // ── Funnel checkpoint - payment (patient → clinic) ──
     paymentReceived: {
         type: Boolean,
         default: false,
@@ -210,14 +225,41 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
-    // ── Funnel checkpoint — completion ──
+    // ── Per-visit proof-of-presence OTP ──
+    // Set on "send", consumed+cleared by completeSession, so every session in a
+    // package needs a fresh code before checkout.
+    visitOtpHash: { type: String },
+    visitOtpExpiresAt: { type: Date },
+    visitOtpVerified: { type: Boolean, default: false },
+
+    // Add-on consent OTP. Confirming an add-on used to be staff ticking a box on
+    // the customer's behalf; the code proves the customer actually agreed to the
+    // charge. One at a time - `addonOtpTarget` pins which add-on it is for, so a
+    // code sent for one service can't confirm another.
+    addonOtpHash: { type: String },
+    addonOtpExpiresAt: { type: Date },
+    addonOtpTarget: { type: String },
+
+    // ── Funnel checkpoint - completion ──
     completedAt: {
         type: Date,
     },
 
-    // ── Therapist work checklist — completed item keys
+    // ── Therapist work checklist - completed item keys
     //    (e.g. "arrived", "performed", "payment", "completed"). ──
     workChecklist: [{ type: String }],
+
+    // Per-session report log - one entry snapshotted on each session completion
+    // so a multi-session booking keeps every visit's note separately.
+    sessionNotes: [
+        {
+            session: { type: Number },
+            at: { type: String },
+            note: { type: String, default: "" },
+            therapist: { type: String, default: "" },
+            by: { type: String, default: "" },
+        },
+    ],
 
     // ── Origin of the record: "public_booking_form" | "dashboard" | undefined ──
     source: {
@@ -257,7 +299,7 @@ const AppointmentBookingSchema = new Schema({
         type: Number,
     },
     // The originating appointment's _id when this was created via "Recommend a
-    // service" (legacy — new flow stacks on recommendedServices instead).
+    // service" (legacy - new flow stacks on recommendedServices instead).
     recommendedFrom: {
         type: String,
     },

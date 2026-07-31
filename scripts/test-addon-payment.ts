@@ -36,7 +36,7 @@ console.log(
   before?.recommendedServices?.[idx]?.paymentCollected,
 );
 
-// Same query shape as setAddonPaymentStatus's $set — proves the update
+// Same query shape as setAddonPaymentStatus's $set - proves the update
 // targets only this one subdocument's fields.
 const path = `recommendedServices.${idx}`;
 const updated = await AppointmentBooking.findByIdAndUpdate(

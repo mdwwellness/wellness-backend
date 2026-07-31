@@ -4,10 +4,10 @@ import mongoose from "mongoose";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 
 /**
- * Delete ALL appointment / booking records — for wiping test data before a
+ * Delete ALL appointment / booking records - for wiping test data before a
  * fresh end-to-end run. IRREVERSIBLE.
  *
- * DRY-RUN by default — prints the count and changes nothing. Pass --apply to delete.
+ * DRY-RUN by default - prints the count and changes nothing. Pass --apply to delete.
  *   npx tsx scripts/delete-all-appointments.ts            # preview count
  *   npx tsx scripts/delete-all-appointments.ts --apply    # delete everything
  */

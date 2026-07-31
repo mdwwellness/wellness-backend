@@ -35,8 +35,8 @@ export type CreateBookingResult =
 /**
  * THE single sanctioned way to create a booking / enquiry. Every entry point
  * (dashboard, public patient site, enquiry conversion, and any future door)
- * funnels through here, so the side-effects — validation guards, ID
- * allocation, customer linkage, invoice generation — stay identical no matter
+ * funnels through here, so the side-effects - validation guards, ID
+ * allocation, customer linkage, invoice generation - stay identical no matter
  * who calls it. Add a new step here once and every caller inherits it.
  *
  * Guards are self-gating: they only fire when the relevant fields are present,
@@ -64,7 +64,7 @@ export async function createBooking(
     };
   }
 
-  // Past-date guard — only when a slot date is given.
+  // Past-date guard - only when a slot date is given.
   if (input.slot?.date) {
     const slotDate = new Date(input.slot.date);
     const today = new Date();
@@ -74,7 +74,7 @@ export async function createBooking(
     }
   }
 
-  // Double-booking guard — only when therapist + full slot are given.
+  // Double-booking guard - only when therapist + full slot are given.
   if (input.doctorId && input.slot?.date && input.slot?.time) {
     const clash = await AppointmentBooking.findOne({
       doctorId: input.doctorId,
@@ -91,12 +91,35 @@ export async function createBooking(
     }
   }
 
+  // Pay-first: never assign a therapist before payment is cleared. Self-gating -
+  // only fires when a therapist is on the payload, so a bare enquiry passes.
+  // Mirrors the guard in updateAppointment; kept here so EVERY create path
+  // (dashboard modal, public form, conversion) inherits it and none can skip it.
+  if (input.doctorId && input.paymentReceived !== true) {
+    return {
+      ok: false,
+      code: 400,
+      message: "Record the payment before assigning a therapist.",
+    };
+  }
+
+  // An unpriced booking generates NO invoice at all, so it would silently never
+  // bill. Self-gating the same way: only fires once a therapist is on the
+  // payload, so a bare public enquiry (price legitimately unknown) still passes.
+  if (input.doctorId && !(Number(input.quotedPrice) > 0)) {
+    return {
+      ok: false,
+      code: 400,
+      message: "Set the booking price before assigning a therapist.",
+    };
+  }
+
   // Repeat folding for open leads (opt-in).
   if (opts.foldOpenRepeats) {
     // Fold only a TRUE repeat: same phone AND same person. A different name on
     // the same (often shared / household) number is a different patient, so
-    // they get their own lead instead of being folded into — and hidden behind
-    // — someone else's. Names compare case/space-insensitively, so re-typing the
+    // they get their own lead instead of being folded into - and hidden behind
+    // - someone else's. Names compare case/space-insensitively, so re-typing the
     // same name slightly differently still folds.
     const target = name.trim().toLowerCase();
     const openLeads = await AppointmentBooking.find({
@@ -156,7 +179,7 @@ export async function createBooking(
     phonenumber,
   });
 
-  // Side-effects — identical for EVERY caller now.
+  // Side-effects - identical for EVERY caller now.
   await ensureCustomerForAppointment(appointment);
   await maybeCreateInvoiceForAppointment({ appointment, actor: opts.actor });
 
