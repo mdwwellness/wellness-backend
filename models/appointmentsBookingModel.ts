@@ -232,6 +232,14 @@ const AppointmentBookingSchema = new Schema({
     visitOtpExpiresAt: { type: Date },
     visitOtpVerified: { type: Boolean, default: false },
 
+    // Add-on consent OTP. Confirming an add-on used to be staff ticking a box on
+    // the customer's behalf; the code proves the customer actually agreed to the
+    // charge. One at a time - `addonOtpTarget` pins which add-on it is for, so a
+    // code sent for one service can't confirm another.
+    addonOtpHash: { type: String },
+    addonOtpExpiresAt: { type: Date },
+    addonOtpTarget: { type: String },
+
     // ── Funnel checkpoint - completion ──
     completedAt: {
         type: Date,

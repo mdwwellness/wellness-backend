@@ -242,10 +242,57 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
     }
 };
 
+/** Key pinning an add-on OTP to one specific recommendation. */
+const addonKey = (serviceId: string, recommendedAt: string) =>
+    `${serviceId}|${recommendedAt}`;
+
+/**
+ * Send a consent code for ONE recommended add-on.
+ *
+ * Confirming an add-on used to be staff ticking a box on the customer's behalf.
+ * The code is the customer's own proof of consent to the charge.
+ */
+export const sendAddonOtp = async (req: Request, res: Response) => {
+    try {
+        const { serviceId, recommendedAt } = req.body ?? {};
+        if (!serviceId || !recommendedAt) {
+            return res.status(400).send({
+                success: false,
+                message: "serviceId and recommendedAt are required.",
+            });
+        }
+        const appt = await AppointmentBooking.findById(req.params.id).exec();
+        if (!appt) {
+            return res.status(404).send({ success: false, message: "Appointment not found" });
+        }
+        const exists = (appt.recommendedServices ?? []).some(
+            (r) => r.serviceId === serviceId && r.recommendedAt === recommendedAt,
+        );
+        if (!exists) {
+            return res.status(404).send({
+                success: false,
+                message: "Recommendation not found on this visit.",
+            });
+        }
+
+        const code = String(crypto.randomInt(1000, 10000));
+        appt.addonOtpHash = await bcrypt.hash(code, 10);
+        appt.addonOtpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+        appt.addonOtpTarget = addonKey(serviceId, recommendedAt);
+        await appt.save();
+        // Returned so the exec can send it via wa.me (same manual channel as the
+        // visit OTP).
+        return res.status(200).send({ success: true, code });
+    } catch (error: any) {
+        console.error("[sendAddonOtp]", error);
+        return res.status(500).send({ success: false, message: "Server error" });
+    }
+};
+
 export const confirmAppointmentRecommendation = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { serviceId, recommendedAt } = req.body ?? {};
+        const { serviceId, recommendedAt, code } = req.body ?? {};
 
         if (!serviceId || typeof serviceId !== "string") {
             return res.status(400).send({
@@ -279,6 +326,27 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
             });
         }
 
+        // Consent gate: the customer's code, not staff's word. Pinned to THIS
+        // add-on, so a code sent for one service can't confirm another.
+        if (
+            !appointment.addonOtpHash ||
+            !appointment.addonOtpExpiresAt ||
+            appointment.addonOtpExpiresAt < new Date() ||
+            appointment.addonOtpTarget !== addonKey(serviceId, recommendedAt)
+        ) {
+            return res.status(400).send({
+                success: false,
+                message: "Send the customer a confirmation code first.",
+            });
+        }
+        const codeOk = await bcrypt.compare(
+            String(code ?? "").trim(),
+            appointment.addonOtpHash,
+        );
+        if (!codeOk) {
+            return res.status(400).send({ success: false, message: "Incorrect code." });
+        }
+
         const actorName = (req.user as any)?.userfName
             ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
             : (req.user as any)?.userEmail ?? "Staff";
@@ -292,13 +360,17 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
                     [`${path}.status`]: "confirmed",
                     [`${path}.confirmedAt`]: confirmedAt,
                     [`${path}.confirmedBy`]: actorName,
+                    // Consume the code so it can't confirm a second add-on.
+                    addonOtpHash: null,
+                    addonOtpExpiresAt: null,
+                    addonOtpTarget: null,
                 },
                 $push: {
                     activityLog: {
                         at: confirmedAt,
                         userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
                         name: actorName,
-                        action: `Customer confirmed add-on: ${recs[idx].serviceName}`,
+                        action: `Customer confirmed add-on by code: ${recs[idx].serviceName}`,
                     },
                 },
             },
@@ -629,6 +701,9 @@ export const updateAppointment = async (req: Request, res: Response) => {
         delete (updateData as any).visitOtpHash;
         delete (updateData as any).visitOtpExpiresAt;
         delete (updateData as any).visitOtpVerified;
+        delete (updateData as any).addonOtpHash;
+        delete (updateData as any).addonOtpExpiresAt;
+        delete (updateData as any).addonOtpTarget;
         delete (updateData as any).sessionNotes;
 
         const current = await AppointmentBooking.findById(id).exec();
