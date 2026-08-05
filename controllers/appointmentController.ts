@@ -14,6 +14,7 @@ import {
     safeSyncInvoiceFromAppointment,
 } from "../lib/invoiceGeneration.ts";
 import { createBooking } from "../lib/bookingService.ts";
+import { bookingLedger } from "../lib/bookingMoney.ts";
 
 // Statuses considered "open" for public-form repeat folding (see addPublicEnquiry).
 const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
@@ -1013,6 +1014,11 @@ export const getPublicPaymentSummary = async (req: Request, res: Response) => {
                 .send({ success: false, message: "Payment link not found" });
         }
 
+        const { lines, due } = bookingLedger(booking);
+        const items = lines
+            .filter((l) => l.state === "due")
+            .map((l) => ({ label: l.label, amount: l.amount }));
+
         return res.status(200).send({
             success: true,
             message: "ok",
@@ -1020,8 +1026,9 @@ export const getPublicPaymentSummary = async (req: Request, res: Response) => {
                 enquiryId: booking.enquiryId,
                 name: booking.name,
                 typeOfappointment: booking.typeOfappointment,
-                amount: booking.quotedPrice,
-                paymentReceived: !!booking.paymentReceived,
+                amount: due,
+                items,
+                paymentReceived: due <= 0,
             },
         });
     } catch (error: any) {
