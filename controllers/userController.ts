@@ -9,7 +9,7 @@ import type { Request, Response } from "express";
 
 const generateAccessToken = (userId: string) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET || "vivo123", {
-    expiresIn: "15m",
+    expiresIn: "5h",
   });
 };
 
@@ -84,7 +84,7 @@ export const login = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 15 * 60 * 1000, // 15 Minutes
+      maxAge: 5 * 60 * 60 * 1000, // 5 Hours
     });
 
     res.cookie("refreshToken", user.refreshToken, {
