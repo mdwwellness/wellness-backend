@@ -15,6 +15,7 @@ import sessionRateRouter from "./routes/sessionRateRoutes.ts";
 import clinicSettingsRouter from "./routes/clinicSettingsRoutes.ts";
 import customerRouter from "./routes/customerRoutes.ts";
 import invoiceRouter from "./routes/invoiceRoutes.ts";
+import specializationRouter from "./routes/specializationRoutes.ts";
 import { logger } from "./lib/logger.ts";
 
 dotenv.config({
@@ -104,6 +105,7 @@ app.use("/api/session-rates", sessionRateRouter);
 app.use("/api/clinic-settings", clinicSettingsRouter);
 app.use("/api/customers", customerRouter);
 app.use("/api/invoices", invoiceRouter);
+app.use("/api/specializations", specializationRouter);
 app.get("/", (req, res) => {
   res.json({
     message: "Welcome to the MDW Wellness Backend",
