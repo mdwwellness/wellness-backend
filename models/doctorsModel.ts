@@ -44,6 +44,15 @@ const doctorsSchema = new mongoose.Schema({
     profileImage: {
         type: String,
     },
+    // Per-therapist revenue split override. When set (0-100), this takes
+    // precedence over the global therapistSplitPercent in ClinicSettings.
+    // null means 'use global default'.
+    splitPercent: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100,
+    },
     certificates: [
         {
             label: { type: String },
