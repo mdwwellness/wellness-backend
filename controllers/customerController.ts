@@ -25,7 +25,7 @@ export async function getCustomers(req: Request, res: Response) {
       const customers = await Customer.find()
         .sort({ createdAt: -1 })
         .limit(500)
-        .select("customer_id name phone email address createdAt updatedAt")
+        .select("customer_id name phone email address notes createdAt updatedAt")
         .exec();
       return res.status(200).send({ success: true, data: customers });
     }
@@ -42,7 +42,7 @@ export async function getCustomers(req: Request, res: Response) {
 
     const customers = await Customer.find(query)
       .limit(50)
-      .select("customer_id name phone email address createdAt updatedAt")
+      .select("customer_id name phone email address notes createdAt updatedAt")
       .exec();
     return res.status(200).send({ success: true, data: customers });
   } catch (err: any) {
@@ -136,6 +136,32 @@ export async function updateCustomer(req: Request, res: Response) {
     }
     if (patch.email && typeof patch.email === "string") customer.email = patch.email;
     if (patch.address && typeof patch.address === "string") customer.address = patch.address;
+
+    // Handle notes operations
+    if (patch.notes) {
+      if (!Array.isArray(customer.notes)) customer.notes = [];
+
+      // Add a new note
+      if (patch.notes.add && typeof patch.notes.add === "object") {
+        const { at, by, userId, note } = patch.notes.add;
+        if (at && by && note) {
+          customer.notes.push({ at, by, userId: userId ?? "", note });
+        }
+      }
+
+      // Edit an existing note (match by at timestamp + by field)
+      if (patch.notes.edit && typeof patch.notes.edit === "object") {
+        const { at, by, note } = patch.notes.edit;
+        if (at && by && note) {
+          const idx = customer.notes.findIndex(
+            (n) => n.at === at && n.by === by
+          );
+          if (idx !== -1) {
+            customer.notes[idx].note = note;
+          }
+        }
+      }
+    }
 
     await customer.save();
     return res.status(200).send({ success: true, message: "Customer updated", data: customer });

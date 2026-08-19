@@ -311,6 +311,7 @@ const AppointmentBookingSchema = new Schema({
             serviceName: { type: String, required: true },
             category: { type: String },
             quotedPrice: { type: Number, required: true },
+            sessions: { type: Number },
             slot: {
                 date: { type: String },
                 time: { type: String },

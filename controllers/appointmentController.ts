@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
+import Customer from "../models/customerModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 import Service from "../models/serviceModel.ts";
 import { nextSequence } from "../lib/counters.ts";
@@ -145,7 +146,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 export const addAppointmentRecommendation = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { serviceId, serviceName, category, quotedPrice, slot } = req.body ?? {};
+        const { serviceId, serviceName, category, quotedPrice, sessions, slot } = req.body ?? {};
 
         if (!serviceId || typeof serviceId !== "string") {
             return res.status(400).send({
@@ -191,6 +192,7 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
             serviceName: serviceName.trim(),
             category: category ?? "",
             quotedPrice,
+            ...(typeof sessions === "number" && sessions > 1 ? { sessions } : {}),
             slot:
                 slot?.date || slot?.time
                     ? { date: slot.date ?? "", time: slot.time ?? "" }
@@ -204,7 +206,7 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
             at: entry.recommendedAt,
             userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
             name: actorName,
-            action: `Recommended add-on: ${entry.serviceName} (₹${quotedPrice})`,
+            action: `Recommended add-on: ${entry.serviceName}${entry.sessions ? ` (${entry.sessions} sessions)` : ""} (₹${quotedPrice})`,
         };
 
         const updated = await AppointmentBooking.findByIdAndUpdate(
@@ -649,14 +651,17 @@ export const completeSession = async (req: Request, res: Response) => {
                 // checklist (arrived/performed/completed) resets for next visit.
                 workChecklist: [],
                 // Snapshot this session's note into the per-session log, then blank
-                // the working note so the next visit starts clean.
+                // the working note so the next visit starts clean. Prefer the
+                // note sent in the request body (the frontend may hold a newer
+                // value that hasn't been persisted to the doc yet) and fall
+                // back to whatever is already stored.
                 note: "",
                 $push: {
                     activityLog: logEntry,
                     sessionNotes: {
                         session: sessionsDone,
                         at: new Date().toISOString(),
-                        note: existing.note ?? "",
+                        note: (typeof req.body?.note === "string" ? req.body.note : "") || existing.note || "",
                         therapist: existing.doctor ?? "",
                         by: actorName,
                     },
@@ -674,6 +679,34 @@ export const completeSession = async (req: Request, res: Response) => {
 
         if (finalUpdate) {
             await safeSyncInvoiceFromAppointment({ appointment: finalUpdate, actor });
+        }
+
+        // Mirror the session note into the customer's cross-visit history so it
+        // appears in "Therapist Notes (Customer History)" on the appointment panel.
+        // Only push when there is actually a note to record. Non-fatal: completion
+        // must never fail just because the customer-note write failed.
+        const sessionNote = (typeof req.body?.note === "string" ? req.body.note : "") || existing.note || "";
+        if (sessionNote.trim() && existing.phonenumber) {
+            try {
+                await Customer.findOneAndUpdate(
+                    {
+                        phone: existing.phonenumber,
+                        name: { $regex: new RegExp("^" + (existing.name ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") },
+                    },
+                    {
+                        $push: {
+                            notes: {
+                                at: new Date().toISOString(),
+                                by: actorName,
+                                userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
+                                note: sessionNote.trim(),
+                            },
+                        },
+                    },
+                ).exec();
+            } catch (err) {
+                console.error("[completeSession] failed to mirror note to customer record:", err);
+            }
         }
 
         return res.status(200).send({

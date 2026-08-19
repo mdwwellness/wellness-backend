@@ -30,6 +30,14 @@ const customerSchema = new Schema(
       type: String,
       default: "",
     },
+    notes: [
+      {
+        at: { type: String, required: true },
+        by: { type: String, required: true },
+        userId: { type: String, default: "" },
+        note: { type: String, required: true },
+      },
+    ],
   },
   { timestamps: true, versionKey: false },
 );
