@@ -225,6 +225,15 @@ const AppointmentBookingSchema = new Schema({
         type: Date,
     },
 
+    // ── Therapist payout tracking (admin → therapist) ──
+    therapistPaid: {
+        type: Boolean,
+        default: false,
+    },
+    therapistPaidAt: {
+        type: Date,
+    },
+
     // ── Per-visit proof-of-presence OTP ──
     // Set on "send", consumed+cleared by completeSession, so every session in a
     // package needs a fresh code before checkout.
