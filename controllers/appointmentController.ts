@@ -5,6 +5,7 @@ import type { Request, Response } from "express";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import Customer from "../models/customerModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
+import { TherapistLeave } from "../models/therapistLeaveModel.ts";
 import Service from "../models/serviceModel.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { logger } from "../lib/logger.ts";
@@ -814,6 +815,41 @@ export const updateAppointment = async (req: Request, res: Response) => {
                 success: false,
                 message: "Record the payment before assigning a therapist.",
             });
+        }
+
+        // ── Therapist availability gate: block assignments on off-days ──
+        if (assigningTherapist) {
+            const targetDate =
+                updateData.slot?.date ||
+                updateData.physioSlot?.date ||
+                cur.slot?.date ||
+                cur.physioSlot?.date;
+            if (targetDate) {
+                const dayOfWeek = new Date(targetDate + "T00:00:00").getDay();
+                const therapist = await Doctor.findOne({
+                    doctorId: updateData.doctorId,
+                }).lean();
+                if (therapist?.weekOffDays?.includes(dayOfWeek)) {
+                    const dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                    return res.status(400).send({
+                        success: false,
+                        message: `${therapist.name ?? "Therapist"} is off on ${dayNames[dayOfWeek]}s. Pick a different date or therapist.`,
+                    });
+                }
+
+                // Check one-off leave blocks
+                const leaveBlock = await TherapistLeave.findOne({
+                    doctorId: updateData.doctorId,
+                    startDate: { $lte: targetDate },
+                    endDate: { $gte: targetDate },
+                }).lean();
+                if (leaveBlock) {
+                    return res.status(400).send({
+                        success: false,
+                        message: `${therapist?.name ?? "Therapist"} is on leave from ${leaveBlock.startDate} to ${leaveBlock.endDate}${leaveBlock.reason ? ` (${leaveBlock.reason})` : ""}. Pick a different date or therapist.`,
+                    });
+                }
+            }
         }
 
         // ── Server-stamped audit entries (actor from the JWT, not the client). ──
