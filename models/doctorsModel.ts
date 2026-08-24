@@ -53,6 +53,17 @@ const doctorsSchema = new mongoose.Schema({
         min: 0,
         max: 100,
     },
+    // ── Weekly off-days (recurring leave) ──
+    // Array of day-of-week numbers (0=Sunday, 6=Saturday).
+    // e.g. [0] = every Sunday off, [0, 6] = weekends off.
+    weekOffDays: {
+        type: [Number],
+        default: [],
+        validate: {
+            validator: (v: number[]) => v.every((d) => d >= 0 && d <= 6),
+            message: "weekOffDays values must be 0-6 (Sun-Sat)",
+        },
+    },
     certificates: [
         {
             label: { type: String },
