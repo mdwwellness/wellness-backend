@@ -116,6 +116,35 @@ export async function getDoctors(req: Request, res: Response) {
   }
 }
 
+export async function getDoctorByUserId(req: Request, res: Response) {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).send({
+        success: false,
+        message: "userId is required",
+      });
+    }
+    const doctor = await Doctor.findOne({ userId }).exec();
+    if (!doctor) {
+      return res.status(404).send({
+        success: false,
+        message: "Therapist profile not found for this user",
+      });
+    }
+    res.status(200).send({
+      success: true,
+      data: doctor,
+    });
+  } catch (error: any) {
+    console.log(error);
+    return res.status(500).send({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
 export async function getPersonalAppointments(req: Request, res: Response) {
   try {
 
