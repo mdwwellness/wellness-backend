@@ -2,11 +2,20 @@ import type { Request, Response } from "express";
 import { TherapistLeave } from "../models/therapistLeaveModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 
-/** GET /api/therapist-leaves/:doctorId — list all leaves for a therapist */
+/** GET /api/therapist-leaves — list all leaves (optionally filter by date) */
 export async function getLeaves(req: Request, res: Response) {
   try {
-    const { doctorId } = req.params;
-    const leaves = await TherapistLeave.find({ doctorId })
+    const { doctorId, date } = req.query;
+    const filter: any = {};
+    if (doctorId) filter.doctorId = doctorId;
+    // If a date is provided, return leaves that cover that date
+    if (date && typeof date === "string") {
+      filter.$or = [
+        { startDate: { $lte: date }, endDate: { $gte: date } },
+        { startDate: date },
+      ];
+    }
+    const leaves = await TherapistLeave.find(filter)
       .sort({ startDate: 1 })
       .lean();
     return res.status(200).json({ success: true, data: leaves });
