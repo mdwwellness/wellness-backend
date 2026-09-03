@@ -2,6 +2,7 @@ import express from "express";
 import {
   adminEditUserProfile,
   adminRegisterUser,
+  changePassword,
   completeProfile,
   deleteUser,
   forgotPassword,
@@ -22,6 +23,7 @@ userRouter.post("/logout", userAuth, logoutUser);
 userRouter.post("/refresh-token", refreshToken);
 userRouter.get("/getallusers", userAuth, getAllUsers);
 userRouter.put("/complete-profile", userAuth, completeProfile);
+userRouter.put("/change-password", userAuth, changePassword);
 userRouter.delete(
   "/admin/delete-user",
   userAuth,

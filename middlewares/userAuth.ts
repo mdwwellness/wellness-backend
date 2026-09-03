@@ -28,7 +28,10 @@ const userAuth = async (req: Request, res: Response, next: NextFunction) => {
     const user = await User.findById(decoded.id).select("-userPassword");
 
     if (!user) {
-      return res.status(404).json({ message: "User no longer exists" });
+      // Return 401 (not 404) so the frontend's fetchWithAuth can attempt a
+      // token refresh.  A missing user means the account was deleted or the
+      // JWT references a stale ID — either way the session is invalid.
+      return res.status(401).json({ message: "User no longer exists" });
     }
 
     if (!user.isActive) {
