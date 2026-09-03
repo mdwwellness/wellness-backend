@@ -1107,3 +1107,51 @@ export const getPublicPaymentSummary = async (req: Request, res: Response) => {
             .send({ success: false, message: "Server error - please try again." });
     }
 };
+
+// ── Therapist session counts ──────────────────────────────────────────────────
+// Returns completed session counts per therapist for the All Therapists table.
+// Aggregates from appointments where status = "completed" or sessionsCompleted > 0.
+export const getTherapistSessionCounts = async (req: Request, res: Response) => {
+    try {
+        const result = await AppointmentBooking.aggregate([
+            {
+                $match: {
+                    doctorId: { $exists: true, $ne: null },
+                    $and: [
+                        { doctorId: { $ne: "" } },
+                    ],
+                    $or: [
+                        { status: "completed" },
+                        { sessionsCompleted: { $gt: 0 } },
+                    ],
+                },
+            },
+            {
+                $group: {
+                    _id: "$doctorId",
+                    totalSessions: { $sum: "$sessionsCompleted" },
+                    completedBookings: { $sum: 1 },
+                },
+            },
+            {
+                $project: {
+                    _id: 0,
+                    doctorId: "$_id",
+                    totalSessions: 1,
+                    completedBookings: 1,
+                },
+            },
+        ]);
+
+        return res.status(200).send({
+            success: true,
+            message: "ok",
+            data: result,
+        });
+    } catch (error: any) {
+        console.error("[getTherapistSessionCounts]", error);
+        return res
+            .status(500)
+            .send({ success: false, message: "Server error - please try again." });
+    }
+};

@@ -14,6 +14,7 @@ import {
   deleteAppointment,
   getAllAppointments,
   updateAppointment,
+  getTherapistSessionCounts,
 } from "../controllers/appointmentController.ts";
 import userAuth from "../middlewares/userAuth.ts";
 const appointmentRouter = express.Router();
@@ -28,6 +29,7 @@ appointmentRouter.get("/pay/:token", getPublicPaymentSummary);
 
 appointmentRouter.post("/", userAuth, addAppointmentsDetails);
 appointmentRouter.get("/", userAuth, getAllAppointments);
+appointmentRouter.get("/therapist-session-counts", userAuth, getTherapistSessionCounts);
 appointmentRouter.post("/:id/pay-link", userAuth, createPaymentLink);
 appointmentRouter.post("/:id/recommendations", userAuth, addAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/otp", userAuth, sendAddonOtp);

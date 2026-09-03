@@ -61,6 +61,13 @@ const AppointmentBookingSchema = new Schema({
     totalSessions: {
         type: Number,
     },
+    // Gap in calendar days between sessions (e.g. 7 = weekly, 14 = biweekly).
+    // Only meaningful when totalSessions > 1; session 1's date + interval gives
+    // session 2's date, and so on. Stored so follow-up sessions can be generated
+    // at booking time and still rescheduled individually later.
+    sessionIntervalDays: {
+        type: Number,
+    },
     sessionsCompleted: {
         type: Number,
         default: 0,
@@ -306,6 +313,26 @@ const AppointmentBookingSchema = new Schema({
     // later changes). For recommended bookings this is the recommended price.
     quotedPrice: {
         type: Number,
+    },
+    // ── Discount / offer tracking ──
+    // originalPrice: the list price before any discount.
+    // discountAmount: how much was deducted (fixed amount or percentage value).
+    // discountType: "fixed" = subtract amount, "percent" = subtract percentage.
+    // discountCode: optional promo/coupon code applied.
+    originalPrice: {
+        type: Number,
+    },
+    discountAmount: {
+        type: Number,
+        default: 0,
+    },
+    discountType: {
+        type: String,
+        enum: ["fixed", "percent"],
+        default: "fixed",
+    },
+    discountCode: {
+        type: String,
     },
     // The originating appointment's _id when this was created via "Recommend a
     // service" (legacy - new flow stacks on recommendedServices instead).
