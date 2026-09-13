@@ -16,6 +16,14 @@ const doctorsSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    firstName: {
+        type: String,
+        default: "",
+    },
+    lastName: {
+        type: String,
+        default: "",
+    },
     gender:{
         type:String,
         requied:true,

@@ -205,7 +205,7 @@ export async function updateDoctorDetails(req: Request, res: Response) {
 export async function updateTherapistSuperAdmin(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays } = req.body;
+    const { name, firstName, lastName, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays } = req.body;
 
     // 1️⃣ Find the Doctor first to get userId
     const doctor = await Doctor.findOne({ doctorId: id }).exec();
@@ -241,9 +241,22 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
     }
 
     // 3️⃣ Update the Doctor document
+    const doctorUpdate: Record<string, unknown> = {};
+    if (firstName !== undefined) doctorUpdate.firstName = firstName;
+    if (lastName !== undefined) doctorUpdate.lastName = lastName;
+    if (name !== undefined) doctorUpdate.name = name;
+    if (phonenumber !== undefined) doctorUpdate.phonenumber = phonenumber;
+    if (email !== undefined) doctorUpdate.email = email;
+    if (specialization !== undefined) doctorUpdate.specialization = specialization;
+    if (bio !== undefined) doctorUpdate.bio = bio;
+    if (isActive !== undefined) doctorUpdate.isActive = isActive;
+    if (profileImage !== undefined) doctorUpdate.profileImage = profileImage;
+    if (certificates !== undefined) doctorUpdate.certificates = certificates;
+    if (weekOffDays !== undefined) doctorUpdate.weekOffDays = weekOffDays;
+
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { doctorId: id },
-      { name, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays },
+      { $set: doctorUpdate },
       { new: true, runValidators: true }
     ).exec();
 
@@ -255,7 +268,8 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
     const userUpdate: Record<string, unknown> = {};
     if (email) userUpdate.userEmail = email;
     if (phonenumber) userUpdate.userPhone = phonenumber;
-    if (name) userUpdate.userName = name;
+    if (firstName !== undefined) userUpdate.userfName = firstName;
+    if (lastName !== undefined) userUpdate.userlName = lastName;
     if (typeof isActive === "boolean") userUpdate.isActive = isActive;
 
     let updatedUser = null;

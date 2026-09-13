@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import User from "../models/userModel.ts";
+import { Doctor } from "../models/doctorsModel.ts";
 import bcrypt from "bcryptjs";
 import { ROLES } from "../lib/index.ts";
 import { sendPasswordResetEmail } from "../lib/mailer.ts";
@@ -299,6 +300,7 @@ export const adminEditUserProfile = async (req: Request, res: Response) => {
       userPhone,
       role,
       userPassword,
+      isActive,
     } = req.body;
     if (!userId) {
       return res
@@ -368,6 +370,37 @@ export const adminEditUserProfile = async (req: Request, res: Response) => {
     if (roleChanged) user.refreshToken = "";
 
     await user.save();
+
+    // If this is a therapist, sync profile changes to the Doctor roster.
+    // The Doctor model stores name/email/phone separately from the User
+    // model, so admin updates to one don't automatically reach the other.
+    if (user.role === "THERAPIST") {
+        const doctorUpdate: Record<string, unknown> = {};
+        if (userfName !== undefined || userlName !== undefined) {
+            doctorUpdate.firstName = user.userfName || "";
+            doctorUpdate.lastName = user.userlName || "";
+            doctorUpdate.name = `${user.userfName} ${user.userlName}`.trim();
+        }
+        if (userEmail !== undefined) doctorUpdate.email = userEmail;
+        if (userPhone !== undefined && userPhone) {
+            doctorUpdate.phonenumber = Number(userPhone);
+        }
+        if (typeof isActive === "boolean") doctorUpdate.isActive = isActive;
+
+        console.log("[adminEditUserProfile] Doctor sync - userId:", userId, "update:", doctorUpdate);
+        if (Object.keys(doctorUpdate).length > 0) {
+            const result = await Doctor.findOneAndUpdate(
+                { userId: userId },
+                { $set: doctorUpdate }
+            ).catch((err) => {
+                // Log but don't fail the request — the User update succeeded.
+                console.error("[adminEditUserProfile] Failed to sync Doctor:", err.message);
+                return null;
+            });
+            console.log("[adminEditUserProfile] Doctor sync result:", result);
+        }
+    }
+
     return res.status(200).json({
       success: true,
       message: "User updated successfully",
@@ -443,6 +476,30 @@ export const completeProfile = async (req:Request, res:Response) => {
                 runValidators: true 
             }
         ).select("-userPassword");
+
+        // If this is a therapist, sync profile changes to the Doctor roster.
+        // The Doctor model stores name/email/phone separately from the User
+        // model, so updates to one don't automatically reach the other.
+        if (updatedUser && updatedUser.role === "THERAPIST") {
+            const doctorUpdate: Record<string, unknown> = {};
+            if (updateData.userfName || updateData.userlName) {
+                doctorUpdate.firstName = updatedUser.userfName || "";
+                doctorUpdate.lastName = updatedUser.userlName || "";
+                doctorUpdate.name = `${updatedUser.userfName} ${updatedUser.userlName}`.trim();
+            }
+            if (userEmail) doctorUpdate.email = userEmail;
+            if (userPhone) doctorUpdate.phonenumber = Number(userPhone);
+
+            if (Object.keys(doctorUpdate).length > 0) {
+                await Doctor.findOneAndUpdate(
+                    { userId: userId.toString() },
+                    { $set: doctorUpdate }
+                ).catch((err) => {
+                    // Log but don't fail the request — the User update succeeded.
+                    console.error("[completeProfile] Failed to sync Doctor:", err.message);
+                });
+            }
+        }
 
         res.status(200).json({
             success: true,

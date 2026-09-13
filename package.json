@@ -4,7 +4,8 @@
   "main": "server.ts",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc",
     "start": "nodemon --exec tsx server.ts",
     "dev": "node --loader ts-node/esm server.ts"
@@ -35,6 +36,7 @@
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^5.0.0"
   }
 }
