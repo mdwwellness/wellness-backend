@@ -18,10 +18,15 @@ import invoiceRouter from "./routes/invoiceRoutes.ts";
 import specializationRouter from "./routes/specializationRoutes.ts";
 import therapistLeaveRouter from "./routes/therapistLeaveRoutes.ts";
 import { logger } from "./lib/logger.ts";
+import { assertJwtSecrets } from "./lib/env.ts";
 
 dotenv.config({
   path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".env"),
 });
+
+// Must run after dotenv, before anything can serve a request. A missing JWT
+// secret used to fall back to a hardcoded string that's in the git history.
+assertJwtSecrets();
 
 const app = express();
 const allowedOrigins = [

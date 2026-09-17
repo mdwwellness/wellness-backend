@@ -4,24 +4,21 @@ import User from "../models/userModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 import bcrypt from "bcryptjs";
 import { ROLES } from "../lib/index.ts";
+import { jwtRefreshSecret, jwtSecret } from "../lib/env.ts";
 import { sendPasswordResetEmail } from "../lib/mailer.ts";
 import express from "express";
 import type { Request, Response } from "express";
 
 const generateAccessToken = (userId: string) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET || "vivo123", {
+  return jwt.sign({ id: userId }, jwtSecret(), {
     expiresIn: "5h",
   });
 };
 
 const generateRefreshToken = (userId: string) => {
-  return jwt.sign(
-    { id: userId },
-    process.env.JWT_REFRESH_SECRET || "vivo123refresh",
-    {
-      expiresIn: "30d", // Long-lived refresh token - keeps the session ~1 month
-    },
-  );
+  return jwt.sign({ id: userId }, jwtRefreshSecret(), {
+    expiresIn: "30d", // Long-lived refresh token - keeps the session ~1 month
+  });
 };
 
 export const refreshToken = async (req: Request, res: Response) => {
@@ -30,10 +27,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     if (!refreshToken)
       return res.status(401).json({ message: "Refresh token required" });
 
-    const decoded = jwt.verify(
-      refreshToken,
-      process.env.JWT_REFRESH_SECRET || "vivo123refresh",
-    ) as jwt.JwtPayload;
+    const decoded = jwt.verify(refreshToken, jwtRefreshSecret()) as jwt.JwtPayload;
 
     const user = await User.findById(decoded.id);
 
