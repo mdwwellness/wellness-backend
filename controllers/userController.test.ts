@@ -25,19 +25,24 @@ function buildChainableMock(resolveValue: any) {
   return chain;
 }
 
-vi.mock("../models/userModel.ts", () => ({
-  default: {
-    findById: mockUserFindById,
-    findByIdAndUpdate: (...args: any[]) => {
-      // Store args so we can assert on them
-      mockUserFindByIdAndUpdate(...args);
-      // Return a chainable object with .select()
-      const result = mockUserFindByIdAndUpdate.mock.results[0]?.value;
-      return buildChainableMock(result);
-    },
-    findOne: mockUserFindOne,
-  },
-}));
+vi.mock("../models/userModel.ts", () => {
+  // Constructable so `new User(data)` (used by adminRegisterUser/addDoctor)
+  // works the same as the static-method mock used everywhere else.
+  function MockUser(this: any, data: any) {
+    Object.assign(this, data);
+    this.save = mockUserSave;
+  }
+  MockUser.findById = mockUserFindById;
+  MockUser.findByIdAndUpdate = (...args: any[]) => {
+    // Store args so we can assert on them
+    mockUserFindByIdAndUpdate(...args);
+    // Return a chainable object with .select()
+    const result = mockUserFindByIdAndUpdate.mock.results[0]?.value;
+    return buildChainableMock(result);
+  };
+  MockUser.findOne = mockUserFindOne;
+  return { default: MockUser };
+});
 
 vi.mock("../models/doctorsModel.ts", () => ({
   Doctor: {
@@ -54,7 +59,7 @@ vi.mock("../lib/mailer.ts", () => ({
 }));
 
 // ── Import after mocks ─────────────────────────────────────────────────────
-import { completeProfile, adminEditUserProfile } from "./userController.ts";
+import { completeProfile, adminEditUserProfile, adminRegisterUser } from "./userController.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function mockReq(body: any = {}, userOverride: any = {}) {
@@ -401,6 +406,60 @@ describe("adminEditUserProfile — Doctor sync", () => {
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: false, message: "User not found" })
+    );
+  });
+});
+
+describe("adminRegisterUser — role validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // No existing user with this email/phone, so the code reaches role validation.
+    mockUserFindOne.mockResolvedValue(null);
+  });
+
+  it("rejects an unknown role with a clean 400 instead of crashing on save", async () => {
+    const req = mockReq({
+      userfName: "New",
+      userlName: "Person",
+      userEmail: "new@example.com",
+      userPhone: "9999999999",
+      userPassword: "password123",
+      role: "CUSTOMER", // not a valid enum value on the User model
+    });
+    const res = mockRes();
+
+    await adminRegisterUser(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Invalid role"),
+      })
+    );
+  });
+
+  it("accepts a valid role regardless of casing", async () => {
+    mockUserSave.mockResolvedValue(true);
+
+    const req = mockReq({
+      userfName: "New",
+      userlName: "Person",
+      userEmail: "new@example.com",
+      userPhone: "9999999999",
+      userPassword: "password123",
+      role: "staff", // lowercase - should still be accepted and uppercased
+    });
+    const res = mockRes();
+
+    await adminRegisterUser(req, res);
+
+    expect(mockUserSave).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        user: expect.objectContaining({ role: "STAFF" }),
+      })
     );
   });
 });
