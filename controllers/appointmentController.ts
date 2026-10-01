@@ -16,7 +16,13 @@ import {
     safeSyncInvoiceFromAppointment,
 } from "../lib/invoiceGeneration.ts";
 import { createBooking } from "../lib/bookingService.ts";
+import {
+    BOOKING_SOURCES,
+    isSourceChange,
+    resolveBookingSource,
+} from "../lib/bookingSource.ts";
 import { bookingLedger } from "../lib/bookingMoney.ts";
+import { lockedSplitFields } from "../lib/therapistSplit.ts";
 
 // Statuses considered "open" for public-form repeat folding (see addPublicEnquiry).
 const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
@@ -43,10 +49,9 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
         // All creation logic - validation, ID allocation, customer linkage, and
         // invoice generation - lives in the one createBooking() service, so this
         // dashboard path and the public path can never drift apart again.
-        const result = await createBooking(req.body, {
-            source: "dashboard",
-            actor,
-        });
+        // No pinned source here: staff pick online / whatsapp / walk-in /
+        // therapist on the form, and createBooking validates it.
+        const result = await createBooking(req.body, { actor });
 
         if (!result.ok) {
             return res
@@ -578,6 +583,13 @@ export const completeSession = async (req: Request, res: Response) => {
         const total =
             service?.packageCount ?? existing.totalSessions ?? 1;
 
+        // Lock the therapist's split in at the first completed session, so a
+        // later change to their % never rewrites this booking's earnings.
+        const splitLock = await lockedSplitFields(
+            existing.therapistSplitPercent,
+            existing.doctorId,
+        );
+
         // Ceiling guard: never complete past the package total. Atomic conditional
         // increment - only bumps when the current count (0 if the field is missing)
         // is still below `total`; returns null if the package is already complete.
@@ -591,7 +603,7 @@ export const completeSession = async (req: Request, res: Response) => {
             {
                 $inc: { sessionsCompleted: 1 },
                 // Consume the verification so the next visit needs a fresh OTP.
-                $set: { visitOtpVerified: false, visitOtpHash: null, visitOtpExpiresAt: null },
+                $set: { visitOtpVerified: false, visitOtpHash: null, visitOtpExpiresAt: null, ...splitLock },
             },
             { new: true },
         ).exec();
@@ -740,6 +752,9 @@ export const updateAppointment = async (req: Request, res: Response) => {
         delete (updateData as any).addonOtpExpiresAt;
         delete (updateData as any).addonOtpTarget;
         delete (updateData as any).sessionNotes;
+        // Locked in by the server at completion (below / completeSession) only;
+        // otherwise a therapist could raise their own cut on a booking.
+        delete (updateData as any).therapistSplitPercent;
 
         const current = await AppointmentBooking.findById(id).exec();
         if (!current) {
@@ -749,6 +764,32 @@ export const updateAppointment = async (req: Request, res: Response) => {
             });
         }
         const cur = current as any;
+
+        // ── Booking source: act only on a genuine change (see isSourceChange -
+        // whole-record PUTs echo the stored value, including legacy ones).
+        if (isSourceChange(updateData, cur)) {
+            const resolved = await resolveBookingSource({
+                // An echoed legacy value (e.g. only the referrer changed on an
+                // old booking) falls back to what's stored.
+                source: BOOKING_SOURCES.includes(updateData.source)
+                    ? updateData.source
+                    : cur.source,
+                referredByDoctorId:
+                    updateData.referredByDoctorId ?? cur.referredByDoctorId,
+            });
+            if (!resolved.ok) {
+                return res
+                    .status(resolved.code)
+                    .send({ success: false, message: resolved.message });
+            }
+            Object.assign(updateData, resolved.fields);
+        } else {
+            // Unchanged: keep what's stored, and never let a client-sent
+            // referredByName overwrite the server-resolved one.
+            delete updateData.source;
+            delete updateData.referredByDoctorId;
+            delete updateData.referredByName;
+        }
 
         // ── Actor: from the verified JWT (userAuth), never the client body. ──
         // Login stores user.id = User._id, and reachedOutBy.userId is set to that
@@ -867,6 +908,17 @@ export const updateAppointment = async (req: Request, res: Response) => {
                 action: `Therapist reassigned (${cur.doctorId} → ${updateData.doctorId})${reason ? ` - reason: ${reason}` : ""}`,
             });
         }
+        // Marked completed by hand (not via checkout): lock the split in too.
+        if (updateData.status === "completed" && cur.status !== "completed") {
+            Object.assign(
+                updateData,
+                await lockedSplitFields(
+                    cur.therapistSplitPercent,
+                    updateData.doctorId ?? cur.doctorId,
+                ),
+            );
+        }
+
         if (reason && !updateData.statusNote) updateData.statusNote = reason;
         if (entries.length) {
             const base = Array.isArray(updateData.activityLog)
@@ -961,7 +1013,6 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             typeOfappointment,
             preferredReachOutTime,
             note,
-            source,
             service,
             vitals,
         } = req.body;
@@ -974,7 +1025,6 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             typeOfappointment: typeOfappointment || undefined,
             preferredReachOutTime: preferredReachOutTime || undefined,
             note: note || undefined,
-            source: source || "public_booking_form",
             service: service || undefined,
             vitals: Array.isArray(vitals) && vitals.length ? vitals : undefined,
             status: "enquiry",
@@ -982,9 +1032,10 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
 
         // Same createBooking() service the dashboard uses - so a public lead now
         // gets the SAME customer linkage + invoice handling + guards. Repeat
-        // folding stays on for the public form.
+        // folding stays on for the public form. Anything arriving through the
+        // website is an online booking, whatever `source` the client sends.
         const result = await createBooking(input, {
-            source: source || "public_booking_form",
+            source: "online",
             foldOpenRepeats: true,
         });
 

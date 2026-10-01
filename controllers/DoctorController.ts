@@ -7,7 +7,24 @@ import { TherapistLeave } from "../models/therapistLeaveModel.ts";
 import { Types } from "mongoose";
 import { logger } from "../lib/logger.ts";
 import { nextSequence } from "../lib/counters.ts";
+import { canManageSplit, parseSplitPercent } from "../lib/therapistSplit.ts";
 
+/**
+ * The splitPercent part of a therapist update. Profile saves echo the whole
+ * record back, so an unchanged value is simply ignored; only a real change is
+ * checked, and only Admin / Super Admin may make one (a therapist uses the
+ * same PUT for their own profile and must not raise their own cut).
+ */
+function readSplitUpdate(req: Request): { fields: { splitPercent?: number }; error?: string } {
+  const raw = req.body?.splitPercent;
+  if (raw === undefined || raw === null || raw === "") return { fields: {} };
+  if (!canManageSplit(req.user?.role)) return { fields: {} };
+  const split = parseSplitPercent(raw);
+  if (split == null) {
+    return { fields: {}, error: "Earnings split must be a number between 0 and 100." };
+  }
+  return { fields: { splitPercent: split } };
+}
 
 
 export async function addDoctor(req: Request, res: Response) {
@@ -26,6 +43,17 @@ export async function addDoctor(req: Request, res: Response) {
       return res.status(400).send({
         success: false,
         message: "A login password (at least 6 characters) is required.",
+      });
+    }
+    // Admins must set the split; other back-office roles can't see it, so a
+    // therapist they add starts without one until an admin sets it.
+    const splitPercent = canManageSplit(req.user?.role)
+      ? parseSplitPercent(details.splitPercent)
+      : null;
+    if (canManageSplit(req.user?.role) && splitPercent == null) {
+      return res.status(400).send({
+        success: false,
+        message: "Earnings split % (0-100) is required.",
       });
     }
 
@@ -66,6 +94,7 @@ export async function addDoctor(req: Request, res: Response) {
       const { password: _pw, ...doctorFields } = details;
       const saveDoctor = new Doctor({
         ...doctorFields,
+        splitPercent,
         doctorId: finalDoctorId,
         userId: newUser._id.toString(),
       });
@@ -177,10 +206,12 @@ export async function updateDoctorDetails(req: Request, res: Response) {
   try {
     const { id } = req.params;
     const { name, doctorId, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays } = req.body;
-    // console.log(req.body);
+    const split = readSplitUpdate(req);
+    if (split.error) return res.status(400).json({ message: split.error });
+
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { doctorId: id },
-      { name, doctorId, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays },
+      { name, doctorId, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays, ...split.fields },
       { new: true, runValidators: true }
     );
 
@@ -253,6 +284,9 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
     if (profileImage !== undefined) doctorUpdate.profileImage = profileImage;
     if (certificates !== undefined) doctorUpdate.certificates = certificates;
     if (weekOffDays !== undefined) doctorUpdate.weekOffDays = weekOffDays;
+    const split = readSplitUpdate(req);
+    if (split.error) return res.status(400).json({ message: split.error });
+    Object.assign(doctorUpdate, split.fields);
 
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { doctorId: id },

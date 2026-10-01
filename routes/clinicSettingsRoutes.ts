@@ -9,8 +9,7 @@ import { PERMISSIONS } from "../lib/index.ts";
 
 const clinicSettingsRouter = express.Router();
 
-// GET must stay open to therapists: the earnings page and the therapist
-// earnings tab read therapistSplitPercent to work out their own cut.
+// GET stays open to every signed-in role: the booking forms read the gap.
 clinicSettingsRouter.get("/", userAuth, getClinicSettings);
 clinicSettingsRouter.put(
   "/",

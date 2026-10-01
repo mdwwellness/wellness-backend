@@ -29,17 +29,6 @@ export const updateClinicSettings = async (req: Request, res: Response) => {
       updates.bookingGapMinutes = gap;
     }
 
-    if (req.body?.therapistSplitPercent !== undefined) {
-      const split = Number(req.body.therapistSplitPercent);
-      if (!Number.isFinite(split) || split < 0 || split > 100) {
-        return res.status(400).send({
-          success: false,
-          message: "`therapistSplitPercent` must be a number between 0 and 100.",
-        });
-      }
-      updates.therapistSplitPercent = split;
-    }
-
     if (Object.keys(updates).length === 0) {
       return res.status(400).send({
         success: false,

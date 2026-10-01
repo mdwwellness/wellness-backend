@@ -277,9 +277,31 @@ const AppointmentBookingSchema = new Schema({
         },
     ],
 
-    // ── Origin of the record: "public_booking_form" | "dashboard" | undefined ──
+    // ── How the booking reached us: "online" | "whatsapp" | "walk_in" | "therapist".
+    //    Older rows hold "public_booking_form" / "dashboard". No enum here on
+    //    purpose - validated in lib/bookingSource.ts, see the note there.
     source: {
         type: String,
+    },
+
+    // ── Therapist who referred a source="therapist" booking. Separate from
+    //    doctorId (the therapist ASSIGNED to do the visit), which drives the
+    //    double-booking, pay-first and visibility rules. Name is copied from the
+    //    Doctor record server-side, same pattern as doctor/doctorId.
+    referredByDoctorId: {
+        type: String,
+    },
+    referredByName: {
+        type: String,
+    },
+
+    // ── The therapist's split %, locked in when the booking completes so a
+    //    later change to their split never rewrites this booking's earnings.
+    //    Server-set only (lib/therapistSplit.ts); client updates can't touch it.
+    therapistSplitPercent: {
+        type: Number,
+        min: 0,
+        max: 100,
     },
 
     // ── How many times this person submitted a booking while this lead stayed

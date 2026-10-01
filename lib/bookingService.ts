@@ -1,6 +1,7 @@
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { nextSequence } from "./counters.ts";
 import { logger } from "./logger.ts";
+import { resolveBookingSource } from "./bookingSource.ts";
 import {
   ensureCustomerForAppointment,
   maybeCreateInvoiceForAppointment,
@@ -15,7 +16,10 @@ export interface CreateBookingActor {
 }
 
 export interface CreateBookingOptions {
-  /** Where the booking came from (e.g. "dashboard", "public_booking_form"). */
+  /**
+   * Pins the booking source for an entry point that can only mean one thing
+   * (the public site is always "online"). Leave unset to take the client's pick.
+   */
   source?: string;
   /** Who triggered it (back-office user), for invoice attribution. */
   actor?: CreateBookingActor;
@@ -195,6 +199,18 @@ export async function createBooking(
     }
   }
 
+  // How the booking reached us. Checked before the ID is allocated so a bad
+  // value never burns an ENQ number. opts.source wins when set: it's how an
+  // entry point that can only mean one thing (the public site) pins it.
+  const resolvedSource = await resolveBookingSource({
+    source: opts.source ?? input.source,
+    referredByDoctorId: input.referredByDoctorId,
+  });
+  if (!resolvedSource.ok) {
+    return { ok: false, code: resolvedSource.code, message: resolvedSource.message };
+  }
+  const sourceFields = resolvedSource.fields;
+
   // Allocate the booking / enquiry ID and persist.
   const seq = await nextSequence("enquiry");
   const enquiryId = `ENQ-${String(seq).padStart(4, "0")}`;
@@ -207,12 +223,15 @@ export async function createBooking(
     // totalSessions captures the original count; sessionNumber is the moving pointer.
     sessionNumber: 1,
     status: input.status || "enquiry",
-    source: input.source || opts.source || undefined,
+    // After ...input on purpose, so a client-sent referredByName can't stick.
+    ...sourceFields,
+    // Locked in by the server when the booking completes, never client-sent.
+    therapistSplitPercent: undefined,
   });
   await appointment.save();
   logger.info("Booking created", {
     enquiryId,
-    source: input.source || opts.source,
+    source: sourceFields.source,
     phonenumber,
   });
 
@@ -285,7 +304,8 @@ export async function createBooking(
           quotedPrice: Math.round((Number(input.quotedPrice) || 0) / totalSessions),
           // Status: scheduled but not ongoing (no payment/OTP needed per session)
           status: "scheduled",
-          source: input.source || opts.source || undefined,
+          // Every session in a course came in the same way as session 1.
+          ...sourceFields,
           enquiryId: followUpEnquiryId,
           // Link back to session 1
           activityLog: [

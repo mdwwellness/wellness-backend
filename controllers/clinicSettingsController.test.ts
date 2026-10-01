@@ -33,24 +33,10 @@ function mockRes() {
 describe("updateClinicSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindOneAndUpdate.mockResolvedValue({ bookingGapMinutes: 60, therapistSplitPercent: 60 });
+    mockFindOneAndUpdate.mockResolvedValue({ bookingGapMinutes: 60 });
   });
 
-  it("saves therapistSplitPercent on its own, without requiring bookingGapMinutes", async () => {
-    const req = mockReq({ therapistSplitPercent: 70 });
-    const res = mockRes();
-
-    await updateClinicSettings(req, res);
-
-    expect(mockFindOneAndUpdate).toHaveBeenCalledWith(
-      { key: "global" },
-      { $set: { therapistSplitPercent: 70 } },
-      { new: true, upsert: true },
-    );
-    expect(res.status).toHaveBeenCalledWith(200);
-  });
-
-  it("still saves bookingGapMinutes on its own", async () => {
+  it("saves bookingGapMinutes", async () => {
     const req = mockReq({ bookingGapMinutes: 45 });
     const res = mockRes();
 
@@ -63,8 +49,8 @@ describe("updateClinicSettings", () => {
     );
   });
 
-  it("rejects an out-of-range therapistSplitPercent", async () => {
-    const req = mockReq({ therapistSplitPercent: 150 });
+  it("ignores the removed global therapistSplitPercent", async () => {
+    const req = mockReq({ therapistSplitPercent: 70 });
     const res = mockRes();
 
     await updateClinicSettings(req, res);
