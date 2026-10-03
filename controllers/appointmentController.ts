@@ -21,11 +21,9 @@ import {
     isSourceChange,
     resolveBookingSource,
 } from "../lib/bookingSource.ts";
-import { bookingLedger } from "../lib/bookingMoney.ts";
+import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
-
-// Statuses considered "open" for public-form repeat folding (see addPublicEnquiry).
-const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
+import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 
 // Back-office roles that see every appointment / enquiry record.
 // THERAPIST is intentionally NOT in this set - therapists see only their
@@ -959,13 +957,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
     }
 };
 
-// ── Rate limiting for the public (NO auth) endpoints ──────────────────────────
-// Buckets are keyed "<scope>:<ip>" so endpoints never share a budget: a customer
-// loading their payment page must not be able to lock a different person out of
-// the booking form, or vice versa.
-const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_WINDOW_MS = 60_000;
-
+// ── Rate limits for the public (NO auth) endpoints (see lib/rateLimit.ts) ─────
 // Writes: a real person fills this form once. Tight, to blunt spam.
 const ENQUIRY_LIMIT_PER_MINUTE = 5;
 // Reads: idempotent, no side effects, and already guarded by a 2^128 token -
@@ -973,25 +965,6 @@ const ENQUIRY_LIMIT_PER_MINUTE = 5;
 // carriers run CGNAT, so MANY paying customers share one public IP and a tight
 // limit would have them 429 each other out of paying.
 const PAY_LOOKUP_LIMIT_PER_MINUTE = 60;
-
-function tooManyRequests(key: string, limit: number): boolean {
-    const now = Date.now();
-    const bucket = rateLimitBuckets.get(key);
-    if (!bucket || bucket.resetAt < now) {
-        rateLimitBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-        return false;
-    }
-    bucket.count++;
-    return bucket.count > limit;
-}
-
-function clientIp(req: Request): string {
-    return (
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-        req.socket.remoteAddress ||
-        "unknown"
-    );
-}
 
 // ── Public booking endpoint (NO auth) ─────────────────────────────────────────
 // Used by the public mdw patient site's booking form.
@@ -1134,7 +1107,7 @@ export const getPublicPaymentSummary = async (req: Request, res: Response) => {
                 .send({ success: false, message: "Payment link not found" });
         }
 
-        const { lines, due } = bookingLedger(booking);
+        const { lines, due } = payableLedger(booking);
         const items = lines
             .filter((l) => l.state === "due")
             .map((l) => ({ label: l.label, amount: l.amount }));

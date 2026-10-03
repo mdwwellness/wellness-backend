@@ -26,6 +26,19 @@ function required(name: "JWT_SECRET" | "JWT_REFRESH_SECRET"): string {
 export const jwtSecret = () => required("JWT_SECRET");
 export const jwtRefreshSecret = () => required("JWT_REFRESH_SECRET");
 
+/**
+ * Secret for Customers' App tokens. Unlike the staff secrets this is optional
+ * (the staff dashboard must keep running without it), so it returns null
+ * instead of throwing and the customer routes answer 503. A short secret or one
+ * reused from JWT_SECRET is treated as unset: sharing it would let a leaked
+ * key mint both kinds of token.
+ */
+export function customerJwtSecret(): string | null {
+  const value = process.env.CUSTOMER_JWT_SECRET;
+  if (!value || value.length < 32 || value === process.env.JWT_SECRET) return null;
+  return value;
+}
+
 /** Call once at startup so a missing secret is a boot failure, not a runtime surprise. */
 export function assertJwtSecrets(): void {
   jwtSecret();

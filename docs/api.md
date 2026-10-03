@@ -422,9 +422,13 @@ Only `name` and `phonenumber` are wire-required. Everything else is
 optional. See [models.md → AppointmentBooking](models.md#appointmentbooking)
 for the full field list and which fields fill in at each funnel stage.
 
-**Duplicate-phone behavior**: rejects with `409 Conflict` if an *open* record
-already exists for this phone (status in `enquiry | scheduled | ongoing`).
-Cancelled / completed records do NOT block re-engagement.
+**Duplicate-phone behavior**: Staff creates never fold or block: a second record for the same phone is
+allowed. Repeat folding exists only on the public form
+(`POST /api/appointments/public`) and the customer app
+(`POST /api/customer-app/bookings`): a submission merges into an open lead
+with status `enquiry`, the same phone, the same name (case and spaces ignored)
+and the same service, and the merge is logged on that lead. Anything else
+creates a new record.
 
 Success response:
 ```json
@@ -437,7 +441,6 @@ Success response:
 
 Errors:
 - `400 { success: false, message: "Name and phone number are required." }`
-- `409 { success: false, message: "An open enquiry/appointment already exists for this phone number." }`
 
 ### GET `/api/appointments`
 
@@ -542,6 +545,295 @@ Success response:
 > ⚠️ `patientsInCurrentMonth` and `appointmentsInCurrentMonth` filter on
 > `slot.date`, so they only count records that actually have a slot set
 > (i.e. NOT pure enquiries).
+
+---
+
+## 📱 Customers' App - `/api/customer-app`
+
+Implemented in [`controllers/customerAppController.ts`](../controllers/customerAppController.ts),
+routed in [`routes/customerAppRoutes.ts`](../routes/customerAppRoutes.ts).
+
+For the customer-facing app (patients, not staff). Accounts are shared with
+the patient site: one phone is one account in `mdw.users`, linked to the
+clinic's `CUST-####` record (see
+[models.md: Customer account](models.md#customer-account-mdwusers)).
+
+**Auth**: sign in with a phone OTP, then send the returned token as
+`Authorization: Bearer <token>` on every other call. Cookies are never read
+here, staff tokens don't work on these routes and customer tokens don't work
+on staff routes. Tokens last 7 days with no refresh: on a 401, sign in again.
+Logout is client-side (drop the token).
+
+Every call marked "customer" re-reads the account, so blocking it takes effect
+at once:
+- `401 "Sign in required."`: no `Authorization: Bearer` header.
+- `401 "Invalid or expired session."`: bad token; an expired one also carries `"code": "TOKEN_EXPIRED"`.
+- `403 "This account is blocked."` / `403 "This account isn't registered for MDW Wellness."`
+
+**Who you are comes from the token**: phone, name, email, account id and
+customer id are never read from a request body. Bodies are allow-listed and
+unknown fields are rejected by name (`400 "Unknown field(s): quotedPrice."`).
+
+**Not configured**: without a valid `CUSTOMER_JWT_SECRET` every route answers
+`503 "Customer accounts aren't available right now."`; without MSG91 the two
+`/auth` routes answer `503 "Phone sign-in isn't available right now."`.
+Browser origins must be listed in `CUSTOMER_APP_URL` (CORS), otherwise
+`403 "Origin not allowed"`.
+
+**Per-IP limits** use the client address Express derives when `TRUST_PROXY`
+is set to the number of proxy hops in front of the app (on Render, confirm the
+hop count from a real request's `X-Forwarded-For` before setting it). Without
+it they use the first `X-Forwarded-For` entry, which a client can spoof.
+Per-phone and per-account limits don't depend on it.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/auth/otp` | 🔓 | Send a login OTP by SMS |
+| POST | `/auth/verify` | 🔓 | Check the OTP and sign in (creates the account on first login) |
+| GET | `/me` | customer | Own profile |
+| PATCH | `/me` | customer | Edit own profile |
+| PUT | `/me/photo` | customer | Upload the profile photo (raw image body) |
+| GET | `/bookings` | customer | Own bookings, newest first |
+| POST | `/bookings` | customer | Ask for a booking (creates an enquiry) |
+
+### POST `/api/customer-app/auth/otp` 🔓
+
+Request (`+91 98765 43210` and `09876543210` work too):
+```json
+{ "phone": "9876543210" }
+```
+
+Success response:
+```json
+{ "success": true, "message": "OTP sent." }
+```
+
+Limits per hour: 5 per phone, 20 per IP, 300 in total.
+
+Errors:
+- `400 "Enter a valid 10-digit Indian mobile number."`
+- `429 "Too many OTP requests. Please try again later."`
+- `502 "Couldn't send the OTP right now. Please try again."` (MSG91 failed)
+- `503 "Phone sign-in isn't available right now."`
+
+### POST `/api/customer-app/auth/verify` 🔓
+
+Request (`name` is optional, and `null` counts as not sent. When sent it must
+be 2-80 characters after trimming, and it only fills in an account that has
+no name yet):
+```json
+{ "phone": "9876543210", "otp": "123456", "name": "Asha Verma" }
+```
+
+Success response:
+```jsonc
+{
+  "success": true,
+  "message": "Signed in.",
+  "data": {
+    "token": "<jwt>",
+    "expiresIn": 604800,   // seconds (7 days)
+    "isNewAccount": true,
+    "profile": { /* same shape as GET /me */ }
+  }
+}
+```
+
+Signing in tags the account `products: ["wellness"]` and, when it has a name,
+links it to the clinic's customer record (creating one if needed). A failed
+link doesn't fail the sign-in; it is retried on the next profile save, photo or
+booking.
+
+Errors:
+- `400 "Enter a valid 10-digit Indian mobile number."`
+- `400 "Enter the OTP you received."` (not exactly 6 digits)
+- `400 "Enter your name (2-80 characters)."` (checked before the OTP, so it isn't used up)
+- `400 "Invalid or expired OTP."`
+- `403 "This account is blocked."`
+- `429 "Too many attempts. Please try again later."` (30 an hour per IP; per phone: 10 an hour and 30 a day)
+- `502 "Couldn't verify the OTP right now. Please try again."`
+- `503 "Phone sign-in isn't available right now."`
+
+### GET `/api/customer-app/me`
+
+Success response (missing values are `null`):
+```jsonc
+{
+  "success": true,
+  "data": {
+    "accountId": "64b7f0c2a1b2c3d4e5f60718",
+    "customerId": "CUST-0074",     // null until the profile has a name (or while its record belongs to another login)
+    "phone": "9876543210",
+    "name": "Asha Verma",
+    "email": "asha@example.com",
+    "gender": "female",            // "male" | "female" | "other"
+    "dob": "1990-04-12",
+    "age": 36,                     // from dob, never stored
+    "address": "12 Lake Road, Flat 3B",
+    "city": "Kolkata",
+    "pincode": "700091",
+    "emergencyContact": { "name": "Ravi Verma", "phone": "9876500000", "relation": "Brother" },
+    "profilePhotoUrl": "https://<app>.ufs.sh/f/<key>",
+    "profileComplete": true        // the account has a name
+  }
+}
+```
+
+### PATCH `/api/customer-app/me`
+
+Send only the fields to change. `null` clears any field except `name`. A
+blank string (spaces only counts) also clears `email`, `address` and `city`,
+and `""` clears `pincode`. `name` can't be cleared, and `""` for `gender` or
+`dob` is a 400. In `emergencyContact`, a `null` or blank `relation` is left
+out.
+
+```json
+{ "name": "Asha Verma", "gender": "female", "dob": "1990-04-12", "city": "Kolkata" }
+```
+
+| Field | Rule |
+|---|---|
+| `name` | 2-80 characters |
+| `email` | valid address, max 254, stored lowercase. Not verified. |
+| `gender` | `"male"`, `"female"` or `"other"` |
+| `dob` | `"YYYY-MM-DD"`, a real date, not in the future, at most 120 years ago |
+| `address` | max 200 characters |
+| `city` | max 80 characters |
+| `pincode` | 6 digits, not starting with 0 |
+| `emergencyContact` | `{ "name": 2-80 chars, "phone": Indian mobile, "relation"?: max 40 }` |
+
+`name` changes the account name only. The clinic's customer record keeps the
+name it was created with (staff can change it in the dashboard), because
+bookings are matched to customers by phone + name. The first save with a name
+creates or links that record. `email` is copied to the linked record (cleared
+there as `""`).
+
+Success response: `200 { "success": true, "message": "Profile updated.", "data": <profile> }`
+
+Errors:
+- `400` with the validation message, e.g. `"Phone can't be changed here."`, `"Nothing to update."`
+- `400 "Add your name before the other details."` (the other details live on the clinic record, which needs a name; sending `name` in the same request is enough)
+- `409 "That email is already used by another account."`
+- `409 "Your clinic record is linked to another login. Please contact us."` (other details sent while the record for this phone + name belongs to another login; a `name` or `email` in the same request is still saved)
+- `429 "Too many profile updates. Please try again later."` (20 per account per hour)
+
+### PUT `/api/customer-app/me/photo`
+
+The body is the raw image, max 4 MB, sent as `image/jpeg`, `image/png` or
+`image/webp`. The file's own signature must match the Content-Type. The
+profile needs a name first; the upload creates or links the clinic record if
+needed. The replaced photo is deleted from UploadThing once the new one is
+saved (best effort). Limit: 5 uploads per account per hour, checked before
+the body is read.
+
+```bash
+curl -X PUT "$BASE/api/customer-app/me/photo" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: image/jpeg" \
+  --data-binary @photo.jpg
+```
+
+Success response: `200 { "success": true, "message": "Photo updated.", "data": <profile> }`
+
+Errors:
+- `400 "The photo is empty."`
+- `400 "That file isn't a valid image."`
+- `400 "Add your name before uploading a photo."`
+- `409 "Your clinic record is linked to another login. Please contact us."`
+- `413 "request entity too large"` over 4 MB
+- `415 "Send the photo as image/jpeg, image/png or image/webp."`
+- `429 "Too many photo uploads. Please try again later."`
+- `502 "Couldn't save the photo right now. Please try again."` (UploadThing failed; the old photo is kept)
+- `503 "Photo upload isn't available right now."` (checked before anything is written)
+
+### GET `/api/customer-app/bookings`
+
+Every booking on the signed-in phone, newest first, at most 100. A shared
+household number shows everyone's bookings; `patientName` says whose.
+
+Success response:
+```jsonc
+{
+  "success": true,
+  "data": [
+    {
+      "enquiryId": "ENQ-0042",
+      "patientName": "Asha Verma",
+      "service": "Home Therapy",
+      "typeOfappointment": "appointment",          // or "consultation"
+      "bookingKind": "course",                     // "intake" | "course" | null
+      "status": "scheduled",                       // enquiry | scheduled | ongoing | completed | cancelled
+      "slot": { "date": "2026-10-05", "time": "11:30" },   // see below; null when no date or time
+      "therapistName": "Dr. Reddy",
+      "sessionsCompleted": 0,
+      "totalSessions": 5,
+      "preferredReachOutTime": { "from": "09:00", "to": "11:00" },
+      "amountDue": 1500,                           // null when nothing is payable on this row (see below)
+      "paymentReceived": false,
+      "payToken": "3f9c...",                       // payment page: /pay/<payToken>; null on cancelled rows
+      "createdAt": "2026-10-01T09:12:44.000Z"
+    }
+  ]
+}
+```
+
+- `slot`: the visit staff scheduled (`physioSlot`) when set, else the slot
+  that was asked for, field by field (date and time each fall back on their own).
+- `amountDue`: the booking fee and confirmed add-ons not yet paid on this row,
+  computed by the same rule as the public pay page (`payableLedger`). A course
+  is billed on its first row, so follow-up rows count only their own confirmed
+  add-ons. `null` means nothing is payable on this row: it is cancelled, it has
+  no price yet, or it is a course follow-up with no add-ons.
+- `paymentReceived`: `true` once `amountDue` is 0. When `amountDue` is `null`
+  it is the stored flag, which is `false` for a new enquiry and for course
+  follow-up rows (their payment is recorded on the first row).
+
+Use `amountDue > 0` to decide whether a row is payable, and `amountDue === 0`
+to show "Paid".
+
+### POST `/api/customer-app/bookings`
+
+Request:
+```json
+{
+  "service": "Home Therapy",
+  "preferredReachOutTime": { "from": "09:00", "to": "11:00" },
+  "note": "Knee pain after a fall",
+  "location": "12 Lake Road, Kolkata"
+}
+```
+
+| Field | Rule |
+|---|---|
+| `service` | required: `"Online Consultation"`, `"Home Therapy"` or `"Vitals Check"` |
+| `preferredReachOutTime` | optional `{ from, to }`, 24-hour `"HH:MM"`, `from` before `to` |
+| `note` | optional, max 1000 characters |
+| `vitals` | optional, `"Vitals Check"` only: up to 10 items, each max 100 characters |
+| `location` | optional, max 300 characters; defaults to the profile's address, city and pincode |
+
+The booking is stored as `status: "enquiry"`, `source: "online"`, under the
+clinic record's name (else the account name), with the account's phone and
+email. The clinic record is created or linked first if needed.
+
+A request is folded into an existing booking instead of creating a new one
+only when the same phone already has a booking still in `status: "enquiry"`
+with the same patient name (case and spacing ignored) and the same `service`.
+The new details are added to that enquiry's activity log. A different name, a
+different service, or a booking staff have already scheduled always creates a
+new enquiry.
+
+Success responses:
+```jsonc
+// 201, new enquiry
+{ "success": true, "message": "Booking received - our team will reach out shortly.", "data": { "enquiryId": "ENQ-0042", "folded": false } }
+// 200, folded into the open one
+{ "success": true, "message": "We already have your enquiry - we've noted your latest details.", "data": { "enquiryId": "ENQ-0041", "folded": true } }
+```
+
+Errors:
+- `400` with the validation message
+- `400 "Add your name to your profile first."`
+- `429 "Too many bookings. Please try again later."` (10 per account per hour)
 
 ---
 

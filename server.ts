@@ -17,8 +17,10 @@ import customerRouter from "./routes/customerRoutes.ts";
 import invoiceRouter from "./routes/invoiceRoutes.ts";
 import specializationRouter from "./routes/specializationRoutes.ts";
 import therapistLeaveRouter from "./routes/therapistLeaveRoutes.ts";
+import customerAppRouter, { warnIfCustomerAppUnconfigured } from "./routes/customerAppRoutes.ts";
 import { logger } from "./lib/logger.ts";
 import { assertJwtSecrets } from "./lib/env.ts";
+import { errorHandler } from "./lib/httpErrors.ts";
 
 dotenv.config({
   path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".env"),
@@ -27,12 +29,22 @@ dotenv.config({
 // Must run after dotenv, before anything can serve a request. A missing JWT
 // secret used to fall back to a hardcoded string that's in the git history.
 assertJwtSecrets();
+warnIfCustomerAppUnconfigured();
 
 const app = express();
+// TRUST_PROXY = how many reverse proxies sit in front of the app. With it set,
+// req.ip (and so the per-IP rate limits) comes from the hops Express trusts
+// instead of a client-chosen X-Forwarded-For entry. On Render, confirm the hop
+// count from a real request's X-Forwarded-For before setting it.
+const trustProxy = process.env.TRUST_PROXY?.trim();
+if (trustProxy && /^\d+$/.test(trustProxy)) app.set("trust proxy", Number(trustProxy));
 const allowedOrigins = [
   process.env.FRONT_END_URL, // back-office dashboard (prod)
   process.env.PUBLIC_SITE_URL, // public mdw patient site (prod)
-].filter(Boolean) as string[];
+  ...(process.env.CUSTOMER_APP_URL ?? "").split(","), // Customers' App (comma-separated)
+]
+  .map((o) => o?.trim())
+  .filter(Boolean) as string[];
 
 // Any localhost / 127.0.0.1 port is allowed for local dev (e.g. dashboard on
 // :3000, patient site on :3003). The browser sets Origin, so only pages truly
@@ -50,7 +62,12 @@ app.use(
       if (!origin || isLocalhost(origin) || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error(`CORS: origin ${origin} not allowed`));
+        // Still rejected before any route runs, but as a 403 (see the error
+        // handler below) rather than a 500.
+        logger.warn(`CORS: origin ${origin} not allowed`);
+        callback(
+          Object.assign(new Error("Origin not allowed"), { status: 403, expose: true }),
+        );
       }
     },
     credentials: true,
@@ -113,21 +130,16 @@ app.use("/api/customers", customerRouter);
 app.use("/api/invoices", invoiceRouter);
 app.use("/api/specializations", specializationRouter);
 app.use("/api/therapist-leaves", therapistLeaveRouter);
+app.use("/api/customer-app", customerAppRouter);
 app.get("/", (req, res) => {
   res.json({
     message: "Welcome to the MDW Wellness Backend",
     status: "success",
   });
 });
-// ── Catch-all error handler: logs any thrown/rejected error from a route
-//    (Express 5 forwards async errors here) so failures show up in the logs. ──
-app.use(
-  (err: unknown, req: Request, res: Response, _next: NextFunction) => {
-    logger.error(`Unhandled error on ${req.method} ${req.originalUrl}`, err);
-    if (res.headersSent) return;
-    res.status(500).send({ success: false, message: "Server error" });
-  },
-);
+// Catch-all error handler: 4xx middleware errors keep their status, anything
+// else is logged (digits masked) and answered 500. Shared with the router tests.
+app.use(errorHandler);
 
 // Start server
 const PORT = process.env.PORT || 10000;

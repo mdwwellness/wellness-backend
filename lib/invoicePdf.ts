@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import Invoice from "../models/invoiceModel.ts";
-import { uploadPdfBuffer } from "./uploadthing.ts";
+import { uploadBuffer } from "./uploadthing.ts";
 import { drawMdwLogo } from "./mdwLogo.ts";
 
 type InvoiceDoc = InstanceType<typeof Invoice>;
@@ -525,8 +525,9 @@ export async function ensureInvoicePdfGeneratedAndUploaded(
   doc.end();
   const pdfBuffer = await pdfPromise;
 
-  return uploadPdfBuffer({
+  return uploadBuffer({
     buffer: pdfBuffer,
     filename,
+    type: "application/pdf",
   });
 }

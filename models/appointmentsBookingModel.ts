@@ -10,6 +10,8 @@ const AppointmentBookingSchema = new Schema({
     phonenumber: {
         type: Number,
         required: true,
+        // Customer-app "my bookings" and repeat-folding both look bookings up by phone.
+        index: true,
     },
 
     // ── Legacy fields: now OPTIONAL so enquiry-stage records (which don't

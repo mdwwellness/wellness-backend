@@ -31,6 +31,33 @@ function bookingLabel(appointment: {
   return labels[appointment.typeOfappointment ?? ""] ?? "Consultation";
 }
 
+/**
+ * What the customer can actually be asked to pay on this row. A course
+ * follow-up row (packageOriginId set) carries a per-session share of the price
+ * for tracking only, because the whole course is billed on session 1, so only
+ * its own add-ons count. Shared by the public pay page and the customer app so
+ * they never disagree.
+ */
+export function payableLedger(appointment: {
+  packageOriginId?: string | null;
+  quotedPrice?: number | null;
+  paymentReceived?: boolean | null;
+  recommendedServices?: Parameters<typeof bookingLedger>[0]["recommendedServices"] | null;
+  bookingKind?: string | null;
+  totalSessions?: number | null;
+  typeOfappointment?: string | null;
+}) {
+  // Plain copy: callers pass Mongoose documents, whose spread isn't the fields.
+  return bookingLedger({
+    quotedPrice: appointment.packageOriginId ? 0 : appointment.quotedPrice ?? undefined,
+    paymentReceived: appointment.paymentReceived ?? undefined,
+    recommendedServices: appointment.recommendedServices ?? undefined,
+    bookingKind: appointment.bookingKind ?? undefined,
+    totalSessions: appointment.totalSessions ?? undefined,
+    typeOfappointment: appointment.typeOfappointment ?? undefined,
+  });
+}
+
 /** Everything sold on this booking with payment state. */
 export function bookingLedger(appointment: {
   quotedPrice?: number;

@@ -7,9 +7,6 @@ import {
   maybeCreateInvoiceForAppointment,
 } from "./invoiceGeneration.ts";
 
-// Statuses considered "open" for repeat-submission folding.
-const OPEN_STATUSES = ["enquiry", "scheduled", "ongoing"];
-
 export interface CreateBookingActor {
   name?: string;
   email?: string;
@@ -24,9 +21,10 @@ export interface CreateBookingOptions {
   /** Who triggered it (back-office user), for invoice attribution. */
   actor?: CreateBookingActor;
   /**
-   * When true, a new submission for a phone that already has an OPEN lead is
-   * folded into that lead (repeatCount bumped, activity logged) instead of
-   * creating a duplicate row. Public form uses this; dashboard can opt in.
+   * When true, a re-submission of the same request (same phone, name and
+   * service) while its lead is still an un-actioned "enquiry" is folded into
+   * that lead (repeatCount bumped, activity logged) instead of creating a
+   * duplicate row. Public form and Customers' App use this; dashboard can opt in.
    */
   foldOpenRepeats?: boolean;
 }
@@ -154,23 +152,27 @@ export async function createBooking(
 
   // Repeat folding for open leads (opt-in).
   if (opts.foldOpenRepeats) {
-    // Fold only a TRUE repeat: same phone AND same person. A different name on
-    // the same (often shared / household) number is a different patient, so
-    // they get their own lead instead of being folded into - and hidden behind
-    // - someone else's. Names compare case/space-insensitively, so re-typing the
-    // same name slightly differently still folds.
+    // Fold only a TRUE repeat: same phone, same person, same service, into a
+    // lead nobody has scheduled yet. A different name on the same (often
+    // household) number is a different patient; a different service is a new
+    // request; and a scheduled or ongoing booking (or a course follow-up, which
+    // is always created "scheduled") is already being handled, so a new ask
+    // after it is a new lead. Folding any of those would hide it from staff.
+    // Names compare case/space-insensitively, so re-typing the same name
+    // slightly differently still folds. No service on both sides is a match.
     const target = name.trim().toLowerCase();
-    const openLeads = await AppointmentBooking.find({
-      phonenumber,
-      status: { $in: OPEN_STATUSES },
-    });
-    const existing = openLeads.find(
-      (lead) => (lead.name ?? "").trim().toLowerCase() === target,
+    const service = input.service || "";
+    const enquiries = await AppointmentBooking.find({ phonenumber, status: "enquiry" });
+    const existing = enquiries.find(
+      (lead) =>
+        (lead.name ?? "").trim().toLowerCase() === target &&
+        (lead.service || "") === service,
     );
     if (existing) {
       const repeatCount = (existing.repeatCount ?? 1) + 1;
 
       const detailBits: string[] = [];
+      if (input.service) detailBits.push(`service: ${input.service}`);
       if (input.typeOfappointment)
         detailBits.push(`type: ${input.typeOfappointment}`);
       if (input.location) detailBits.push(`location: ${input.location}`);
@@ -178,6 +180,9 @@ export async function createBooking(
         detailBits.push(
           `time: ${input.preferredReachOutTime?.from ?? "?"}-${input.preferredReachOutTime?.to ?? "?"}`,
         );
+      }
+      if (Array.isArray(input.vitals) && input.vitals.length) {
+        detailBits.push(`vitals: ${input.vitals.join(", ")}`);
       }
       if (input.note) detailBits.push(`note: ${input.note}`);
       const action = `Re-submitted (#${repeatCount})${
