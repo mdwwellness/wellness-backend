@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.ts";
+import { jwtSecret } from "../lib/env.ts";
 
 const superAdminAuth = async (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
   try {
@@ -11,10 +12,7 @@ const superAdminAuth = async (req: import("express").Request, res: import("expre
       });
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET!,
-    ) as jwt.JwtPayload;
+    const decoded = jwt.verify(token, jwtSecret()) as jwt.JwtPayload;
 
     const user = await User.findById(decoded.id).select("-userPassword");
 

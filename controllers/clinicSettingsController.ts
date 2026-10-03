@@ -16,19 +16,32 @@ export const getClinicSettings = async (_req: Request, res: Response) => {
 
 export const updateClinicSettings = async (req: Request, res: Response) => {
   try {
-    const gap = Number(req.body?.bookingGapMinutes);
-    if (!Number.isFinite(gap) || gap < 0) {
+    const updates: Record<string, number> = {};
+
+    if (req.body?.bookingGapMinutes !== undefined) {
+      const gap = Number(req.body.bookingGapMinutes);
+      if (!Number.isFinite(gap) || gap < 0) {
+        return res.status(400).send({
+          success: false,
+          message: "`bookingGapMinutes` must be a non-negative number.",
+        });
+      }
+      updates.bookingGapMinutes = gap;
+    }
+
+    if (Object.keys(updates).length === 0) {
       return res.status(400).send({
         success: false,
-        message: "`bookingGapMinutes` must be a non-negative number.",
+        message: "No valid settings provided.",
       });
     }
+
     const doc = await ClinicSettings.findOneAndUpdate(
       { key: KEY },
-      { $set: { bookingGapMinutes: gap } },
+      { $set: updates },
       { new: true, upsert: true },
     );
-    logger.info("Clinic settings updated", { bookingGapMinutes: gap });
+    logger.info("Clinic settings updated", updates);
     return res.status(200).send({ success: true, message: "Settings saved", data: doc });
   } catch (error: any) {
     return res.status(500).send({ success: false, message: error.message });

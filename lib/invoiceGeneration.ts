@@ -6,6 +6,7 @@ import Service from "../models/serviceModel.ts";
 import { nextSequence, nextYearlySequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { ensureInvoicePdfGeneratedAndUploaded } from "./invoicePdf.ts";
+import { OFFERINGS } from "./offerings.ts";
 
 type Actor = {
   name?: string;
@@ -26,7 +27,7 @@ function pad4(n: number): string {
   return String(n).padStart(4, "0");
 }
 
-function formatCustomerId(seq: number): string {
+export function formatCustomerId(seq: number): string {
   return `CUST-${pad4(seq)}`;
 }
 
@@ -43,6 +44,26 @@ function safeNumber(n: unknown): number {
   return 0;
 }
 
+// Find-then-create is not atomic: parallel first logins (or bookings) for one
+// phone all miss, then all create, leaving duplicate CUST records. Chaining
+// every find-or-create for a phone onto the previous one closes that gap.
+// ponytail: per-process lock; if the backend ever runs more than one instance,
+// add a unique { phone, normalized name } index and re-read on duplicate key.
+const phoneLocks = new Map<number, Promise<unknown>>();
+
+export async function withPhoneLock<T>(phone: number, fn: () => Promise<T>): Promise<T> {
+  const run = (phoneLocks.get(phone) ?? Promise.resolve()).then(fn);
+  // The queue must keep moving after a failure, so the stored link never rejects.
+  const settled = run.catch(() => undefined);
+  phoneLocks.set(phone, settled);
+  try {
+    return await run;
+  } finally {
+    // Last in the queue: drop the entry so the map doesn't grow per phone.
+    if (phoneLocks.get(phone) === settled) phoneLocks.delete(phone);
+  }
+}
+
 export async function ensureCustomerForAppointment(
   appointment: any,
 ): Promise<CustomerDoc> {
@@ -56,23 +77,23 @@ export async function ensureCustomerForAppointment(
   // a new name on the same number becomes its own customer instead of borrowing
   // someone else's identity.
   const target = name.trim().toLowerCase();
-  const onThisPhone = await Customer.find({ phone }).exec();
-  let customer =
-    onThisPhone.find(
+  const customer = await withPhoneLock(phone, async () => {
+    const onThisPhone = await Customer.find({ phone }).exec();
+    const match = onThisPhone.find(
       (c) => (c.name ?? "").toString().trim().toLowerCase() === target,
-    ) ?? null;
-  if (!customer) {
+    );
+    if (match) return match;
     const seq = await nextSequence("customer");
-    const customer_id = formatCustomerId(seq);
-    customer = new Customer({
-      customer_id,
+    const created = new Customer({
+      customer_id: formatCustomerId(seq),
       name: name || "Unknown customer",
       phone,
       email,
       address,
     });
-    await customer.save();
-  }
+    await created.save();
+    return created;
+  });
 
   // Backfill the customer ID onto the appointment doc so every appointment
   // carries its own customer_id (visible in the dashboard without a phone join).
@@ -282,7 +303,7 @@ const BOOKING_TYPE_SERVICE: Record<string, string> = {
 // as `service`. ONLY those get the confirmed-booking-type label above - a
 // session booked via the dashboard's "Book Appointment" form also has
 // typeOfappointment:"appointment" but means "a session", not a home visit.
-const ENQUIRY_OFFERINGS = new Set(["Online Consultation", "Home Therapy", "Vitals Check"]);
+const ENQUIRY_OFFERINGS = new Set<string>(OFFERINGS);
 
 /**
  * Itemised breakdown of everything the customer consumed on this appointment:

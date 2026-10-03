@@ -1,7 +1,10 @@
 # Data models
 
-Three Mongoose collections, all in one Mongo database (the connection
-string is `process.env.DATABASE_URL`).
+The backend's collections live in the database named by
+`process.env.DATABASE_URL` (no database name in the URL means MongoDB's
+default, `test`). Customer login accounts live in a second database on the
+same connection, `process.env.IDENTITY_DB` (default `mdw`), collection
+`users`, shared with the patient website.
 
 ## Relationships at a glance
 
@@ -32,6 +35,7 @@ Relationships are **soft / by-string**, not Mongoose `ref` populates.
 There are no `ObjectId` cross-collection references. You match by:
 - `Doctor.email === User.userEmail` (therapist → user account)
 - `AppointmentBooking.doctorId === Doctor.doctorId` (appointment → therapist)
+- `Customer.accountId === String(mdw.users._id)` (clinic record → Customers' App login, see [Customer account](#customer-account-mdwusers))
 
 That means you can't `populate()` — you'd have to do explicit `find()` calls.
 
@@ -201,12 +205,74 @@ The DB doesn't store the derived stage — it's recomputed on read.
 
 ### Duplicate-phone behavior
 
-`POST /api/appointments` blocks creation if a record with the same
-`phonenumber` has `status` in `["enquiry", "scheduled", "ongoing"]` (i.e.
-an "open" lead). Cancelled or completed records do NOT block — clients
-can be re-engaged later.
+Staff creates never fold or block: a second record for the same phone is
+allowed. Repeat folding exists only on the public form
+(`POST /api/appointments/public`) and the customer app
+(`POST /api/customer-app/bookings`): a submission merges into an open lead
+with status `enquiry`, the same phone, the same name (case and spaces ignored)
+and the same service, and the merge is logged on that lead. Anything else
+creates a new record.
+
+`phonenumber` is indexed: "my bookings" and repeat folding both query it.
 
 ### Schema options
 
 `{ timestamps: true, versionKey: false }` — auto `createdAt` / `updatedAt`,
 no `__v` field.
+
+---
+
+## Customer
+
+File: [`models/customerModel.ts`](../models/customerModel.ts)
+Collection: `customers`
+
+The clinic's patient record (`CUST-####`). Created from the dashboard, by any
+booking (`ensureCustomerForAppointment` matches on phone + name), or by the
+Customers' App whenever a signed-in account that has a name has no linked
+record yet: at sign-in, on a profile save (`PATCH /me`), a photo upload
+(`PUT /me/photo`) or a booking (`POST /bookings`). The app reuses the phone +
+name match when one exists and links it, unless another login already owns it.
+
+| Field | Type | Notes |
+|---|---|---|
+| `customer_id` | String, unique (sparse) | Business ID, e.g. `"CUST-0074"` |
+| `name` | String, required | The clinic's name for the patient. The Customers' App never changes it, because bookings are matched to customers by phone + name. |
+| `phone` | Number, required, indexed | NOT unique: one household phone can belong to several patients |
+| `email` | String, default `""` | Kept in step with the app's profile email |
+| `address` | String, default `""` | Street / house line |
+| `notes` | `{ at, by, userId, note }[]` | Staff notes |
+| `accountId` | String, unique (sparse) | **New.** The Customers' App login this record belongs to: `mdw.users._id` as a string. Never stored as `null` or `""`. |
+| `gender` | String enum | **New.** `"male" \| "female" \| "other"` |
+| `dob` | Date | **New.** Age is computed from it, never stored |
+| `city`, `pincode` | String | **New.** |
+| `emergencyContact` | `{ name, phone: Number, relation }` | **New.** No `_id` |
+| `profilePhotoUrl` | String | **New.** UploadThing URL |
+| `createdAt`, `updatedAt` | Date | auto |
+
+---
+
+## Customer account (`mdw.users`)
+
+Code: [`lib/customerAccount.ts`](../lib/customerAccount.ts) (plain driver
+collection, no Mongoose model).
+Database: `process.env.IDENTITY_DB` (default `mdw`), collection `users`.
+
+Not the backend's own database and not the staff `User` collection. It is
+shared with the patient site (wellness.mydawaiwala.com), which writes the same
+documents, so one person has one account whichever site they sign in through.
+
+| Field | Type | Notes |
+|---|---|---|
+| `_id` | ObjectId | The account ID (`sub` of the customer token, `Customer.accountId`) |
+| `phoneE164` | String, **unique** | `"+919876543210"`, the OTP-verified login |
+| `name` | String | Set at first sign-in or from the profile |
+| `email` | String, unique when present (sparse) | From the profile, not verified. Removed (never `""`) when cleared |
+| `referredBy` | String | Patient site only |
+| `roles` | String[] | `["customer"]` |
+| `status` | String | `"active" \| "blocked"`. Blocked: can't sign in, and its tokens stop working on the next call |
+| `products` | String[] | **New.** Which MDW products the person uses: a wellness sign-in adds `"wellness"` (pharmacy would add `"pharmacy"`). The customer-app routes require `"wellness"`. Older accounts are tagged by `scripts/backfill-account-products.ts`. |
+| `createdAt`, `updatedAt` | Date | |
+
+Indexes: `{ phoneE164: 1 }` unique and `{ email: 1 }` unique sparse, the same
+ones the patient site creates.

@@ -17,6 +17,8 @@ import {
   getTherapistSessionCounts,
 } from "../controllers/appointmentController.ts";
 import userAuth from "../middlewares/userAuth.ts";
+import checkPermission from "../middlewares/checkPermissions.ts";
+import { PERMISSIONS } from "../lib/index.ts";
 const appointmentRouter = express.Router();
 
 // Public, unauthenticated booking endpoint (patient site). Rate-limited.
@@ -39,6 +41,14 @@ appointmentRouter.post("/:id/visit-otp/send", userAuth, sendVisitOtp);
 appointmentRouter.post("/:id/visit-otp/verify", userAuth, verifyVisitOtp);
 appointmentRouter.post("/:id/complete-session", userAuth, completeSession);
 appointmentRouter.put("/:id", userAuth, updateAppointment);
-appointmentRouter.delete("/:id", userAuth, deleteAppointment);
+// Deleting a booking is only reachable from the Enquiries drawer, which
+// therapists can't open. Everything above stays open to them on purpose:
+// completing sessions, visit OTPs and add-on recommendations are their job.
+appointmentRouter.delete(
+  "/:id",
+  userAuth,
+  checkPermission(PERMISSIONS.APPOINTMENT_DELETE),
+  deleteAppointment,
+);
 
 export default appointmentRouter;

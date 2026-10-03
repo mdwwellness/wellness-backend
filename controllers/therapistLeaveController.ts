@@ -5,7 +5,9 @@ import { Doctor } from "../models/doctorsModel.ts";
 /** GET /api/therapist-leaves — list all leaves (optionally filter by date) */
 export async function getLeaves(req: Request, res: Response) {
   try {
-    const { doctorId, date } = req.query;
+    // doctorId can arrive as a path param (GET /:doctorId) or a query string (GET /?doctorId=)
+    const doctorId = req.params.doctorId || req.query.doctorId;
+    const { date } = req.query;
     const filter: any = {};
     if (doctorId) filter.doctorId = doctorId;
     // If a date is provided, return leaves that cover that date

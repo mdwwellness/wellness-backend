@@ -6,10 +6,11 @@ import assert from "node:assert";
 import { createBooking } from "../lib/bookingService.ts";
 
 // Assigning a therapist without cleared payment must be rejected.
-const unpaid = await createBooking(
-  { name: "Gate Test", phonenumber: 9999999999, doctorId: "THR-0001" },
-  { source: "test" },
-);
+const unpaid = await createBooking({
+  name: "Gate Test",
+  phonenumber: 9999999999,
+  doctorId: "THR-0001",
+});
 assert.equal(unpaid.ok, false, "unpaid+therapist should be rejected");
 assert.equal((unpaid as any).code, 400);
 assert.equal(
@@ -26,7 +27,6 @@ const unpriced = await createBooking(
     doctorId: "THR-0001",
     paymentReceived: true,
   },
-  { source: "test" },
 );
 assert.equal(unpriced.ok, false, "paid but unpriced should be rejected");
 assert.equal((unpriced as any).code, 400);

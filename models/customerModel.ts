@@ -1,5 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 
+export const GENDERS = ["male", "female", "other"] as const;
+
 const customerSchema = new Schema(
   {
     customer_id: {
@@ -30,6 +32,24 @@ const customerSchema = new Schema(
       type: String,
       default: "",
     },
+    // The customer-app login (mdw.users _id) this record belongs to. Sparse so
+    // the many records without a login don't collide; never stored as null/"".
+    accountId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    gender: { type: String, enum: GENDERS },
+    dob: Date,
+    city: String,
+    pincode: String,
+    emergencyContact: {
+      type: new Schema(
+        { name: String, phone: Number, relation: String },
+        { _id: false },
+      ),
+    },
+    profilePhotoUrl: String,
     notes: [
       {
         at: { type: String, required: true },

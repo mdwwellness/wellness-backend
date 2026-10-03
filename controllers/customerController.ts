@@ -1,14 +1,7 @@
 import type { Request, Response } from "express";
 import Customer from "../models/customerModel.ts";
 import { nextSequence } from "../lib/counters.ts";
-
-function pad4(n: number): string {
-  return String(n).padStart(4, "0");
-}
-
-function formatCustomerId(seq: number): string {
-  return `CUST-${pad4(seq)}`;
-}
+import { formatCustomerId, withPhoneLock } from "../lib/invoiceGeneration.ts";
 
 function parseSearchToPhone(q: string): number | null {
   const digits = q.replace(/[^\d]/g, "");
@@ -69,11 +62,28 @@ export async function createCustomer(req: Request, res: Response) {
 
     // Identity is phone + person: a different name on the same (household) number
     // is a different customer, so only an exact phone+name match is a duplicate.
+    // Find-then-create runs under the same per-phone lock as every other path
+    // that creates customers, so a concurrent booking or app sign-in for this
+    // phone + name can't produce a second record.
     const target = name.trim().toLowerCase();
-    const onThisPhone = await Customer.find({ phone }).exec();
-    const existing = onThisPhone.find(
-      (c) => (c.name ?? "").toString().trim().toLowerCase() === target,
-    );
+    const { existing, created } = await withPhoneLock(phone, async () => {
+      const onThisPhone = await Customer.find({ phone }).exec();
+      const match = onThisPhone.find(
+        (c) => (c.name ?? "").toString().trim().toLowerCase() === target,
+      );
+      if (match) return { existing: match, created: null };
+      const seq = await nextSequence("customer");
+      return {
+        existing: null,
+        created: await Customer.create({
+          customer_id: formatCustomerId(seq),
+          name: name.trim(),
+          phone,
+          email: email ?? "",
+          address: address ?? "",
+        }),
+      };
+    });
     if (existing) {
       // Same number AND same name already exists. Don't silently overwrite their
       // stored name/email/address on a "create" (a typo'd re-entry would clobber
@@ -86,17 +96,6 @@ export async function createCustomer(req: Request, res: Response) {
         data: existing,
       });
     }
-
-    const seq = await nextSequence("customer");
-    const customer_id = formatCustomerId(seq);
-
-    const created = await Customer.create({
-      customer_id,
-      name: name.trim(),
-      phone,
-      email: email ?? "",
-      address: address ?? "",
-    });
 
     return res.status(201).send({
       success: true,

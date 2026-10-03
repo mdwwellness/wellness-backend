@@ -24,10 +24,15 @@ export async function getInvoices(req: Request, res: Response) {
     const q = String(req.query.q ?? "").trim();
     const type = String(req.query.type ?? "").trim();
     const paymentStatus = String(req.query.paymentStatus ?? "").trim();
+    const appointmentId = String(req.query.appointment_id ?? "").trim();
 
     const query: any = {};
     if (type) query.invoice_type = type;
     if (paymentStatus) query.payment_status = paymentStatus;
+    // Lets a booking ask for its own invoice. Without this, finding it meant
+    // pulling the 100 most recent and filtering client-side, which quietly
+    // found nothing for any older booking.
+    if (appointmentId) query.appointment_id = appointmentId;
 
     if (q) {
       const phoneDigits = q.replace(/[^\d]/g, "");
