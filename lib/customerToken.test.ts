@@ -46,6 +46,13 @@ describe("signCustomerToken", () => {
     expect(CUSTOMER_TOKEN_TTL_SECONDS).toBe(604800);
   });
 
+  it("takes a shorter lifetime for hand-issued test tokens, and still verifies", () => {
+    const token = signCustomerToken(ACCOUNT_ID, 48 * 3600);
+    const payload = jwt.decode(token) as jwt.JwtPayload;
+    expect(payload.exp! - payload.iat!).toBe(48 * 3600);
+    expect(verifyCustomerToken(token)).toEqual({ ok: true, accountId: ACCOUNT_ID });
+  });
+
   it("refuses to sign without a usable secret", () => {
     delete process.env.CUSTOMER_JWT_SECRET;
     expect(() => signCustomerToken(ACCOUNT_ID)).toThrow(/CUSTOMER_JWT_SECRET/);
