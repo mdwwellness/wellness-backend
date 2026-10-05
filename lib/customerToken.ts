@@ -4,12 +4,13 @@ import { customerJwtSecret } from "./env.ts";
 /** Same lifetime as a patient-site session. */
 export const CUSTOMER_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-export function signCustomerToken(accountId: string): string {
+/** `ttlSeconds` is only shortened for hand-issued test tokens (scripts/issue-test-token.ts). */
+export function signCustomerToken(accountId: string, ttlSeconds = CUSTOMER_TOKEN_TTL_SECONDS): string {
   const secret = customerJwtSecret();
   if (!secret) throw new Error("CUSTOMER_JWT_SECRET is not configured.");
   return jwt.sign({ sub: accountId, typ: "customer" }, secret, {
     algorithm: "HS256",
-    expiresIn: CUSTOMER_TOKEN_TTL_SECONDS,
+    expiresIn: ttlSeconds,
   });
 }
 
