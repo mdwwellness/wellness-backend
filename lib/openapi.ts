@@ -4,6 +4,8 @@
  * deliberately left out. Keep it in step with docs/api.md when these change.
  */
 
+export const PRODUCTION_URL = "https://wellness-backend-1-wya5.onrender.com";
+
 const json = (schema: object, example?: object) => ({
   "application/json": { schema, ...(example && { example }) },
 });
@@ -23,7 +25,9 @@ export const openapiSpec = {
       "on production that creates real enquiries, so use a test name and your own phone number.\n\n" +
       "Every response is `{ success, message, data? }`. Check `success`; `message` is written for customers.",
   },
-  servers: [{ url: "/", description: "This server" }],
+  // Absolute, not "/": tools join server + path naively ("/" gave "//api/...").
+  // The /api/docs page adds the server it's served from on top of this.
+  servers: [{ url: PRODUCTION_URL, description: "Production" }],
   tags: [
     { name: "Public", description: "No login needed." },
     { name: "Customer sign-in", description: "Phone OTP. Returns a 7-day Bearer token." },
