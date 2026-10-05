@@ -32,6 +32,7 @@ export const openapiSpec = {
     { name: "Public", description: "No login needed." },
     { name: "Customer sign-in", description: "Phone OTP. Returns a 7-day Bearer token." },
     { name: "Customer profile", description: "Needs `Authorization: Bearer <token>`." },
+    { name: "Customer bookings", description: "Needs `Authorization: Bearer <token>`." },
   ],
   paths: {
     "/api/appointments/public": {
@@ -196,6 +197,125 @@ export const openapiSpec = {
           403: error("Blocked or not a wellness account", "This account is blocked."),
         },
       },
+      patch: {
+        tags: ["Customer profile"],
+        summary: "Update my profile",
+        description:
+          "Send only the fields to change; `null` (or `\"\"` for text) clears one. The phone can't be changed. " +
+          "Unknown fields are rejected by name. The first save that has a name creates or links the clinic record. " +
+          "Limit: 20 per hour.",
+        security: [{ bearer: [] }],
+        requestBody: {
+          required: true,
+          content: json(
+            {
+              type: "object",
+              properties: {
+                name: { type: "string", minLength: 2, maxLength: 80 },
+                email: { type: "string", nullable: true },
+                gender: { type: "string", nullable: true, enum: ["male", "female", "other"] },
+                dob: { type: "string", nullable: true, example: "1990-04-12", description: "YYYY-MM-DD, not in the future" },
+                address: { type: "string", nullable: true, maxLength: 200 },
+                city: { type: "string", nullable: true, maxLength: 80 },
+                pincode: { type: "string", nullable: true, pattern: "^[1-9]\\d{5}$" },
+                emergencyContact: {
+                  type: "object",
+                  nullable: true,
+                  properties: { name: { type: "string" }, phone: { type: "string" }, relation: { type: "string" } },
+                },
+              },
+            },
+            {
+              gender: "female",
+              dob: "1990-04-12",
+              address: "12 Lake Road, Flat 3B",
+              city: "Kolkata",
+              pincode: "700091",
+              emergencyContact: { name: "Ravi Verma", phone: "9876500000", relation: "Brother" },
+            },
+          ),
+        },
+        responses: {
+          200: { description: "Updated", content: json({ type: "object", properties: { success: { type: "boolean" }, message: { type: "string" }, data: { $ref: "#/components/schemas/Profile" } } }) },
+          400: error("Invalid field, unknown field, or no name yet", "Unknown field(s): phone."),
+          401: error("Not signed in", "Sign in required."),
+          409: error("Email used by another account", "That email is already used by another account."),
+          429: error("Rate limit", "Too many profile updates. Please try again later."),
+        },
+      },
+    },
+    "/api/customer-app/me/photo": {
+      put: {
+        tags: ["Customer profile"],
+        summary: "Upload my profile photo",
+        description:
+          "Send the raw image bytes as the request body (not multipart, not base64) with `Content-Type` " +
+          "image/jpeg, image/png or image/webp. Max 4 MB; resize on the device first. Replaces the previous photo. " +
+          "Needs a name on the profile. Limit: 5 per hour.",
+        security: [{ bearer: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "image/jpeg": { schema: { type: "string", format: "binary" } },
+            "image/png": { schema: { type: "string", format: "binary" } },
+            "image/webp": { schema: { type: "string", format: "binary" } },
+          },
+        },
+        responses: {
+          200: { description: "Saved; profile with the new profilePhotoUrl", content: json({ type: "object", properties: { success: { type: "boolean" }, message: { type: "string" }, data: { $ref: "#/components/schemas/Profile" } } }) },
+          400: error("Empty, not a real image, or no name yet", "That file isn't a valid image."),
+          401: error("Not signed in", "Sign in required."),
+          413: error("Over 4 MB", "request entity too large"),
+          415: error("Wrong Content-Type", "Send the photo as image/jpeg, image/png or image/webp."),
+          429: error("Rate limit", "Too many photo uploads. Please try again later."),
+        },
+      },
+    },
+    "/api/customer-app/bookings": {
+      get: {
+        tags: ["Customer bookings"],
+        summary: "List my bookings",
+        description:
+          "Every booking on the signed-in phone number, newest first (max 100). `amountDue` null means nothing is " +
+          "payable on that row; use `payToken` with GET /api/appointments/pay/{token} to show the amount.",
+        security: [{ bearer: [] }],
+        responses: {
+          200: { description: "Bookings", content: json({ type: "object", properties: { success: { type: "boolean" }, data: { type: "array", items: { $ref: "#/components/schemas/CustomerBooking" } } } }) },
+          401: error("Not signed in", "Sign in required."),
+        },
+      },
+      post: {
+        tags: ["Customer bookings"],
+        summary: "Book while signed in",
+        description:
+          "Name, phone and email come from the signed-in account, never the body. Location defaults to the " +
+          "profile address. A repeat for the same service while the enquiry is open is merged (200). Limit: 10 per hour.",
+        security: [{ bearer: [] }],
+        requestBody: {
+          required: true,
+          content: json(
+            {
+              type: "object",
+              required: ["service"],
+              properties: {
+                service: { type: "string", enum: ["Online Consultation", "Home Therapy", "Vitals Check"] },
+                preferredReachOutTime: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } } },
+                note: { type: "string", maxLength: 1000 },
+                vitals: { type: "array", items: { type: "string" }, description: "Only for Vitals Check" },
+                location: { type: "string", maxLength: 300 },
+              },
+            },
+            { service: "Home Therapy", preferredReachOutTime: { from: "10:00", to: "12:00" }, note: "Knee pain" },
+          ),
+        },
+        responses: {
+          201: { description: "New enquiry", content: json({ type: "object", properties: { success: { type: "boolean" }, message: { type: "string" }, data: { type: "object", properties: { enquiryId: { type: "string" }, folded: { type: "boolean" } } } } }, { success: true, message: "Booking received - our team will reach out shortly.", data: { enquiryId: "ENQ-0090", folded: false } }) },
+          200: { description: "Merged into an open enquiry", content: json({ $ref: "#/components/schemas/Message" }) },
+          400: error("Invalid or unknown field, or no name on the profile", "Add your name to your profile first."),
+          401: error("Not signed in", "Sign in required."),
+          429: error("Rate limit", "Too many bookings. Please try again later."),
+        },
+      },
     },
   },
   components: {
@@ -247,6 +367,26 @@ export const openapiSpec = {
               paymentReceived: { type: "boolean" },
             },
           },
+        },
+      },
+      CustomerBooking: {
+        type: "object",
+        properties: {
+          enquiryId: { type: "string", nullable: true },
+          patientName: { type: "string" },
+          service: { type: "string", nullable: true },
+          typeOfappointment: { type: "string", nullable: true },
+          bookingKind: { type: "string", nullable: true, enum: ["intake", "course"] },
+          status: { type: "string", enum: ["enquiry", "scheduled", "ongoing", "completed", "cancelled"] },
+          slot: { type: "object", nullable: true, properties: { date: { type: "string", nullable: true }, time: { type: "string", nullable: true } } },
+          therapistName: { type: "string", nullable: true },
+          sessionsCompleted: { type: "integer" },
+          totalSessions: { type: "integer", nullable: true },
+          preferredReachOutTime: { type: "object", nullable: true, properties: { from: { type: "string" }, to: { type: "string" } } },
+          amountDue: { type: "number", nullable: true, description: "null = nothing payable on this row" },
+          paymentReceived: { type: "boolean" },
+          payToken: { type: "string", nullable: true },
+          createdAt: { type: "string", nullable: true },
         },
       },
       Profile: {
