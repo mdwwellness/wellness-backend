@@ -1,19 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Request, Response } from "express";
 
-const { mockFindOneAndUpdate } = vi.hoisted(() => ({ mockFindOneAndUpdate: vi.fn() }));
+const { mockFindOneAndUpdate, mockDoctorFindOne, mockUserUpdate, mockDoctorFind, mockBookingFind } = vi.hoisted(() => ({
+  mockDoctorFind: vi.fn(),
+  mockBookingFind: vi.fn(),
+  mockFindOneAndUpdate: vi.fn(),
+  mockDoctorFindOne: vi.fn(),
+  mockUserUpdate: vi.fn(),
+}));
 vi.mock("../models/doctorsModel.ts", () => ({
-  Doctor: { findOne: vi.fn(), findOneAndUpdate: mockFindOneAndUpdate },
+  Doctor: { findOne: mockDoctorFindOne, findOneAndUpdate: mockFindOneAndUpdate, find: mockDoctorFind },
 }));
 vi.mock("../models/userModel.ts", () => ({
-  default: { findOne: vi.fn() },
+  default: { findOne: vi.fn(), findByIdAndUpdate: mockUserUpdate },
 }));
-vi.mock("../models/appointmentsBookingModel.ts", () => ({ default: {} }));
+vi.mock("../models/appointmentsBookingModel.ts", () => ({ default: { find: mockBookingFind } }));
 vi.mock("../models/therapistLeaveModel.ts", () => ({ TherapistLeave: {} }));
 vi.mock("../lib/logger.ts", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
 vi.mock("../lib/counters.ts", () => ({ nextSequence: vi.fn() }));
 
-import { addDoctor, updateDoctorDetails } from "./DoctorController.ts";
+import { addDoctor, getDoctors, getReferrals, updateDoctorDetails, updateTherapistSuperAdmin } from "./DoctorController.ts";
 
 function mockReq(body: any = {}) {
   return { body } as unknown as Request;
@@ -115,5 +121,74 @@ describe("updateDoctorDetails - earnings split", () => {
     await updateDoctorDetails(updateReq("SUPER_ADMIN", { splitPercent: 150 }), res);
     expect(res.status).toHaveBeenCalledWith(400);
     expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateTherapistSuperAdmin - login names", () => {
+  const chain = (value: unknown) => ({ exec: () => Promise.resolve(value), select: () => ({ exec: () => Promise.resolve(value) }) });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDoctorFindOne.mockReturnValue(chain({ doctorId: "THR-0012", userId: "u1", email: "t@x.com", phonenumber: "9876500001" }));
+    mockFindOneAndUpdate.mockReturnValue(chain({ doctorId: "THR-0012" }));
+    mockUserUpdate.mockReturnValue(chain({ _id: "u1" }));
+  });
+
+  it("doesn't copy empty first/last names onto the login (they're required there)", async () => {
+    const req = { params: { id: "THR-0012" }, body: { firstName: "", lastName: " ", isActive: true, splitPercent: 60 }, user: { role: "SUPER_ADMIN" } } as unknown as Request;
+    const res = mockRes();
+    await updateTherapistSuperAdmin(req, res);
+    const userSet = mockUserUpdate.mock.calls[0]?.[1]?.$set ?? {};
+    expect(userSet).not.toHaveProperty("userfName");
+    expect(userSet).not.toHaveProperty("userlName");
+    expect(res.status).not.toHaveBeenCalledWith(500);
+  });
+
+  it("still copies real names", async () => {
+    const req = { params: { id: "THR-0012" }, body: { firstName: " Riya ", lastName: "Sen" }, user: { role: "SUPER_ADMIN" } } as unknown as Request;
+    await updateTherapistSuperAdmin(req, mockRes());
+    expect(mockUserUpdate.mock.calls[0][1].$set).toMatchObject({ userfName: "Riya", userlName: "Sen" });
+  });
+});
+
+describe("referral codes", () => {
+  const as = (role: string, id: string, params: object = {}) =>
+    ({ params, body: {}, user: { role, _id: id } }) as unknown as Request;
+  const list = [
+    { doctorId: "THR-1", userId: "u1", referralCode: "AAAAA" },
+    { doctorId: "THR-2", userId: "u2", referralCode: "BBBBB" },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDoctorFind.mockReturnValue({ sort: () => ({ lean: () => ({ exec: () => Promise.resolve(list) }) }) });
+    mockBookingFind.mockReturnValue({ select: () => ({ sort: () => ({ limit: () => ({ lean: () => Promise.resolve([{ enquiryId: "ENQ-1" }]) }) }) }) });
+  });
+
+  it("a therapist sees only their own code in the therapist list; admins see all", async () => {
+    const res = mockRes();
+    await getDoctors(as("THERAPIST", "u1"), res);
+    const sent = (res.send as any).mock.calls[0][0].data;
+    expect(sent.map((d: any) => d.referralCode)).toEqual(["AAAAA", undefined]);
+
+    const adminRes = mockRes();
+    await getDoctors(as("ADMIN", "x"), adminRes);
+    expect((adminRes.send as any).mock.calls[0][0].data.map((d: any) => d.referralCode)).toEqual(["AAAAA", "BBBBB"]);
+  });
+
+  it("referrals: own therapist and back office allowed, another therapist refused", async () => {
+    mockDoctorFindOne.mockReturnValue({ lean: () => Promise.resolve({ userId: "u1" }) });
+    const own = mockRes();
+    await getReferrals(as("THERAPIST", "u1", { id: "THR-1" }), own);
+    expect(own.status).toHaveBeenCalledWith(200);
+    expect(mockBookingFind).toHaveBeenCalledWith({ referredByDoctorId: "THR-1" });
+
+    const other = mockRes();
+    await getReferrals(as("THERAPIST", "u2", { id: "THR-1" }), other);
+    expect(other.status).toHaveBeenCalledWith(403);
+
+    const staff = mockRes();
+    await getReferrals(as("CUSTOMER_CARE", "s1", { id: "THR-1" }), staff);
+    expect(staff.status).toHaveBeenCalledWith(200);
   });
 });

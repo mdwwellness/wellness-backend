@@ -8,6 +8,7 @@ import { Types } from "mongoose";
 import { logger } from "../lib/logger.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { canManageSplit, parseSplitPercent } from "../lib/therapistSplit.ts";
+import { withUniqueReferralCode } from "../lib/referralCode.ts";
 
 /**
  * The splitPercent part of a therapist update. Profile saves echo the whole
@@ -92,13 +93,15 @@ export async function addDoctor(req: Request, res: Response) {
       `THR-${String(await nextSequence("therapist")).padStart(4, "0")}`;
     try {
       const { password: _pw, ...doctorFields } = details;
-      const saveDoctor = new Doctor({
-        ...doctorFields,
-        splitPercent,
-        doctorId: finalDoctorId,
-        userId: newUser._id.toString(),
-      });
-      await saveDoctor.save();
+      await withUniqueReferralCode((referralCode) =>
+        new Doctor({
+          ...doctorFields,
+          splitPercent,
+          doctorId: finalDoctorId,
+          userId: newUser._id.toString(),
+          referralCode,
+        }).save(),
+      );
     } catch (docErr: any) {
       // Roll back the user so we never leave an orphan login.
       await User.findByIdAndDelete(newUser._id).catch(() => {});
@@ -124,8 +127,14 @@ export async function addDoctor(req: Request, res: Response) {
 
 export async function getDoctors(req: Request, res: Response) {
   try {
-    const data = Doctor.find().sort({createdAt:-1});
-    const doctorsDetails = await data.exec();
+    const docs = await Doctor.find().sort({ createdAt: -1 }).lean().exec();
+    // A therapist sees only their own referral code: someone else's would let
+    // them claim bookings they didn't refer.
+    const ownUserId = String((req.user as any)?._id ?? "");
+    const doctorsDetails =
+      req.user?.role === "THERAPIST"
+        ? docs.map((d) => (String(d.userId) === ownUserId ? d : { ...d, referralCode: undefined }))
+        : docs;
     if (!doctorsDetails) {
       return res.status(404).send({
         success: false,
@@ -302,8 +311,11 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
     const userUpdate: Record<string, unknown> = {};
     if (email) userUpdate.userEmail = email;
     if (phonenumber) userUpdate.userPhone = phonenumber;
-    if (firstName !== undefined) userUpdate.userfName = firstName;
-    if (lastName !== undefined) userUpdate.userlName = lastName;
+    // Only non-empty names: the login requires both, and therapists added via
+    // "Add Therapist" have firstName/lastName "" that every save echoes back,
+    // which failed the whole request after the Doctor update had already saved.
+    if (typeof firstName === "string" && firstName.trim()) userUpdate.userfName = firstName.trim();
+    if (typeof lastName === "string" && lastName.trim()) userUpdate.userlName = lastName.trim();
     if (typeof isActive === "boolean") userUpdate.isActive = isActive;
 
     let updatedUser = null;
@@ -330,6 +342,29 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
   } catch (error) {
     console.error("Super-admin therapist update error:", error);
     return res.status(500).json({ message: "Error updating therapist", error });
+  }
+}
+
+/**
+ * Bookings that came in through this therapist's referral code. Back office sees
+ * anyone's; a therapist only their own.
+ */
+export async function getReferrals(req: Request, res: Response) {
+  try {
+    const doctor = await Doctor.findOne({ doctorId: req.params.id }, { userId: 1 }).lean();
+    if (!doctor) return res.status(404).json({ success: false, message: "Therapist not found" });
+    if (req.user?.role === "THERAPIST" && String(doctor.userId) !== String((req.user as any)?._id)) {
+      return res.status(403).json({ success: false, message: "You can only see your own referrals." });
+    }
+    const data = await AppointmentBookingModel.find({ referredByDoctorId: req.params.id })
+      .select("enquiryId name service status paymentReceived createdAt")
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 }
 
