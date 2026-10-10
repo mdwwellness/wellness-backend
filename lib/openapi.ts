@@ -341,6 +341,11 @@ export const openapiSpec = {
             properties: { from: { type: "string", example: "10:00" }, to: { type: "string", example: "12:00" } },
           },
           note: { type: "string" },
+          referralCode: {
+            type: "string",
+            example: "CK43Z",
+            description: "Optional therapist referral code (from a ?ref= link). Case-insensitive; an unknown code is ignored, never an error.",
+          },
         },
       },
       BookingCreated: {
