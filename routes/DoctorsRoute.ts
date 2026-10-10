@@ -8,6 +8,7 @@ import {
   updateDoctorDetails,
   deleteTherapistSuperAdmin,
   updateTherapistSuperAdmin,
+  getReferrals,
 } from "../controllers/DoctorController.ts";
 import userAuth from "../middlewares/userAuth.ts";
 import superAdminAuth from "../middlewares/superAdminAuth.ts";
@@ -38,6 +39,7 @@ doctorRouter.delete(
   deleteTherapistSuperAdmin
 );
 
+doctorRouter.get("/:id/referrals", userAuth, getReferrals);
 doctorRouter.get("/:id", userAuth, getPersonalAppointments);
 // PUT stays open to THERAPIST_EDIT (which therapists hold) because the
 // therapist detail page has no role gate, so a therapist editing their own

@@ -23,6 +23,7 @@ import {
 } from "../lib/bookingSource.ts";
 import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
+import { referrerForCode } from "../lib/referralCode.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 
 // Back-office roles that see every appointment / enquiry record.
@@ -1005,12 +1006,14 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
 
         // Same createBooking() service the dashboard uses - so a public lead now
         // gets the SAME customer linkage + invoice handling + guards. Repeat
-        // folding stays on for the public form. Anything arriving through the
-        // website is an online booking, whatever `source` the client sends.
-        const result = await createBooking(input, {
-            source: "online",
-            foldOpenRepeats: true,
-        });
+        // folding stays on for the public form. A website booking is "online",
+        // whatever `source` the client sends, unless it carries a therapist's
+        // valid referral code; an unknown code is ignored, never an error.
+        const referrer = await referrerForCode(req.body?.referralCode);
+        const result = await createBooking(
+            referrer ? { ...input, referredByDoctorId: referrer } : input,
+            { source: referrer ? "therapist" : "online", foldOpenRepeats: true },
+        );
 
         if (!result.ok) {
             return res
