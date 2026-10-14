@@ -43,7 +43,8 @@ appointmentRouter.post("/:id/recommendations/payment", userAuth, setAddonPayment
 // without the customer reading the code back.
 appointmentRouter.post("/:id/visit-otp/send", userAuth, requireRole("SUPER_ADMIN", "ADMIN", "STAFF"), sendVisitOtp);
 appointmentRouter.post("/:id/visit-otp/verify", userAuth, requireRole("THERAPIST"), verifyVisitOtp);
-appointmentRouter.post("/:id/complete-session", userAuth, completeSession);
+// The therapist completes the visit; an admin can step in for them (logged).
+appointmentRouter.post("/:id/complete-session", userAuth, requireRole("THERAPIST", "SUPER_ADMIN", "ADMIN"), completeSession);
 appointmentRouter.put("/:id", userAuth, updateAppointment);
 // Deleting a booking is only reachable from the Enquiries drawer, which
 // therapists can't open. Everything above stays open to them on purpose:

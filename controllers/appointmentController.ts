@@ -650,9 +650,11 @@ export const completeSession = async (req: Request, res: Response) => {
             at: new Date().toISOString(),
             userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
             name: actorName,
-            action: done
-                ? `Package complete - all ${total} sessions done`
-                : `Session ${sessionsDone} of ${total} completed - schedule next visit`,
+            action:
+                (done
+                    ? `Package complete - all ${total} sessions done`
+                    : `Session ${sessionsDone} of ${total} completed - schedule next visit`) +
+                ((req.user as any)?.role !== "THERAPIST" ? " (completed by an admin on the therapist's behalf)" : ""),
         };
 
         const actor = {
