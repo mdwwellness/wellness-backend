@@ -7,7 +7,7 @@ const { mockFindById, mockFindOneAndUpdate, mockDoctorFindOne } = vi.hoisted(() 
   mockDoctorFindOne: vi.fn(),
 }));
 vi.mock("../models/appointmentsBookingModel.ts", () => ({
-  default: { findById: mockFindById, findOneAndUpdate: mockFindOneAndUpdate },
+  default: { findById: mockFindById, findOneAndUpdate: mockFindOneAndUpdate, findByIdAndUpdate: mockFindOneAndUpdate },
 }));
 vi.mock("../models/doctorsModel.ts", () => ({ Doctor: { findOne: mockDoctorFindOne } }));
 vi.mock("../models/customerModel.ts", () => ({ default: {} }));
@@ -15,12 +15,12 @@ vi.mock("../models/therapistLeaveModel.ts", () => ({ TherapistLeave: {} }));
 vi.mock("../models/serviceModel.ts", () => ({ default: {} }));
 vi.mock("../lib/logger.ts", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
 vi.mock("../lib/counters.ts", () => ({ nextSequence: vi.fn() }));
-vi.mock("../lib/invoiceGeneration.ts", () => ({}));
+vi.mock("../lib/invoiceGeneration.ts", () => ({ safeSyncInvoiceFromAppointment: vi.fn() }));
 vi.mock("bcryptjs", () => ({
   default: { compare: vi.fn(async (a: string) => a === "1234"), hash: vi.fn(async () => "hash") },
 }));
 
-import { verifyVisitOtp } from "./appointmentController.ts";
+import { updateAppointment, verifyVisitOtp } from "./appointmentController.ts";
 
 function res() {
   const r: any = {};
@@ -70,6 +70,27 @@ describe("verifyVisitOtp", () => {
   it("rejects a wrong code", async () => {
     const r = res();
     await verifyVisitOtp(req("0000"), r);
+    expect(r.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe("updateAppointment - lead lock", () => {
+  const put = (role: string, id: string) =>
+    ({ params: { id: "a1" }, body: { status: "ongoing" }, user: { _id: id, role } }) as unknown as Request;
+
+  beforeEach(() => {
+    appt = { _id: "a1", doctorId: "THR-1", reachedOutBy: { userId: "exec1", name: "Manjeet Sharma" } };
+  });
+
+  it("lets the therapist save their visit on a lead an executive owns", async () => {
+    const r = res();
+    await updateAppointment(put("THERAPIST", "t1"), r);
+    expect(r.status).toHaveBeenCalledWith(200);
+  });
+
+  it("still asks another executive for a reason", async () => {
+    const r = res();
+    await updateAppointment(put("STAFF", "exec2"), r);
     expect(r.status).toHaveBeenCalledWith(400);
   });
 });

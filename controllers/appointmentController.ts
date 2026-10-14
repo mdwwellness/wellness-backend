@@ -828,7 +828,10 @@ export const updateAppointment = async (req: Request, res: Response) => {
         const ownerId = cur.reachedOutBy?.userId ?? "";
         const ownerName = cur.reachedOutBy?.name ?? "another executive";
         const isOwner = !!ownerId && !!actorId && ownerId === actorId;
-        const nonOwnerExec = !!ownerId && !isOwner && !isAdmin;
+        // The lead lock is between office executives. A therapist saving their
+        // visit (arrived, checklist, notes) never needs the owner's say-so.
+        const nonOwnerExec =
+            !!ownerId && !isOwner && !isAdmin && user?.role !== "THERAPIST";
 
         // Reason travels in overrideReason (T3/T5) / reassignReason (T4) - not columns.
         const reason = String(
