@@ -17,6 +17,7 @@ import {
   getTherapistSessionCounts,
 } from "../controllers/appointmentController.ts";
 import userAuth from "../middlewares/userAuth.ts";
+import requireRole from "../middlewares/requireRole.ts";
 import checkPermission from "../middlewares/checkPermissions.ts";
 import { PERMISSIONS } from "../lib/index.ts";
 const appointmentRouter = express.Router();
@@ -37,8 +38,11 @@ appointmentRouter.post("/:id/recommendations", userAuth, addAppointmentRecommend
 appointmentRouter.post("/:id/recommendations/otp", userAuth, sendAddonOtp);
 appointmentRouter.post("/:id/recommendations/confirm", userAuth, confirmAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/payment", userAuth, setAddonPaymentStatus);
-appointmentRouter.post("/:id/visit-otp/send", userAuth, sendVisitOtp);
-appointmentRouter.post("/:id/visit-otp/verify", userAuth, verifyVisitOtp);
+// Session start: the office sends the code to the customer, and only the
+// assigned therapist can enter it - so a therapist can never start a session
+// without the customer reading the code back.
+appointmentRouter.post("/:id/visit-otp/send", userAuth, requireRole("SUPER_ADMIN", "ADMIN", "STAFF"), sendVisitOtp);
+appointmentRouter.post("/:id/visit-otp/verify", userAuth, requireRole("THERAPIST"), verifyVisitOtp);
 appointmentRouter.post("/:id/complete-session", userAuth, completeSession);
 appointmentRouter.put("/:id", userAuth, updateAppointment);
 // Deleting a booking is only reachable from the Enquiries drawer, which

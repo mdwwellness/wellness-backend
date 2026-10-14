@@ -249,6 +249,8 @@ const AppointmentBookingSchema = new Schema({
     visitOtpHash: { type: String },
     visitOtpExpiresAt: { type: Date },
     visitOtpVerified: { type: Boolean, default: false },
+    // Wrong guesses on the current code; reset when a new one is sent.
+    visitOtpAttempts: { type: Number, default: 0 },
 
     // Add-on consent OTP. Confirming an add-on used to be staff ticking a box on
     // the customer's behalf; the code proves the customer actually agreed to the

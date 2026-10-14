@@ -500,6 +500,8 @@ export const setAddonPaymentStatus = async (req: Request, res: Response) => {
 // returned so it can be sent to the customer via wa.me. The therapist enters what
 // the customer reads back → verify → completeSession consumes the verification.
 
+const VISIT_OTP_MAX_ATTEMPTS = 5;
+
 export const sendVisitOtp = async (req: Request, res: Response) => {
   try {
     const appt = await AppointmentBooking.findById(req.params.id).exec();
@@ -511,8 +513,10 @@ export const sendVisitOtp = async (req: Request, res: Response) => {
     appt.visitOtpHash = await bcrypt.hash(code, 10);
     appt.visitOtpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
     appt.visitOtpVerified = false;
+    appt.visitOtpAttempts = 0;
     await appt.save();
     // Code returned so the exec can send it via wa.me (manual interim channel).
+    // Only office roles reach this (see the route), never the therapist.
     return res.status(200).send({ success: true, code });
   } catch (error: any) {
     console.error("[sendVisitOtp]", error);
@@ -534,6 +538,26 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
     ) {
       return res.status(400).send({ success: false, message: "No active code - send a new one." });
     }
+
+    // Only the therapist assigned to this booking can start its session.
+    const user = req.user as any;
+    const doctor = await Doctor.findOne({
+      $or: [{ userId: String(user?._id ?? "") }, { email: user?.userEmail }],
+    }).lean();
+    if (!doctor || !appt.doctorId || doctor.doctorId !== appt.doctorId) {
+      return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
+    }
+
+    // Use up one of the code's attempts atomically before checking it, so
+    // parallel guesses can't get past the limit.
+    const reserved = await AppointmentBooking.findOneAndUpdate(
+      { _id: appt._id, visitOtpAttempts: { $not: { $gte: VISIT_OTP_MAX_ATTEMPTS } } },
+      { $inc: { visitOtpAttempts: 1 } },
+    ).exec();
+    if (!reserved) {
+      return res.status(429).send({ success: false, message: "Too many wrong codes - ask the office to send a new one." });
+    }
+
     const ok = await bcrypt.compare(String(code ?? "").trim(), appt.visitOtpHash);
     if (!ok) {
       return res.status(400).send({ success: false, message: "Incorrect code." });
@@ -746,6 +770,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
         delete (updateData as any).visitOtpHash;
         delete (updateData as any).visitOtpExpiresAt;
         delete (updateData as any).visitOtpVerified;
+        delete (updateData as any).visitOtpAttempts;
         delete (updateData as any).addonOtpHash;
         delete (updateData as any).addonOtpExpiresAt;
         delete (updateData as any).addonOtpTarget;
