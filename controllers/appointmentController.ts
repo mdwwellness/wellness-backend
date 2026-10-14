@@ -23,6 +23,7 @@ import {
 } from "../lib/bookingSource.ts";
 import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
+import { applyLockedFields } from "../lib/lockedFields.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 
 // Back-office roles that see every appointment / enquiry record.
@@ -787,6 +788,14 @@ export const updateAppointment = async (req: Request, res: Response) => {
             });
         }
         const cur = current as any;
+
+        // Customer details and the intake price can't be edited by hand.
+        try {
+            await applyLockedFields(updateData, cur);
+        } catch (e: any) {
+            if (e?.status !== 400) throw e;
+            return res.status(400).send({ success: false, message: e.message });
+        }
 
         // ── Booking source: act only on a genuine change (see isSourceChange -
         // whole-record PUTs echo the stored value, including legacy ones).

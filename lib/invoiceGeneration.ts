@@ -294,7 +294,7 @@ function resolveMainPrice(appointment: any, service?: any): number | null {
 
 // Mirror of the frontend BOOKING_TYPES (src/components/pages/enquiries/booking.ts).
 // KEEP IN SYNC - two values. The confirmed booking type is the billing truth.
-const BOOKING_TYPE_SERVICE: Record<string, string> = {
+export const BOOKING_TYPE_SERVICE: Record<string, string> = {
   consultation: "Online Consultation",
   appointment: "Home Visit Consultation",
 };
