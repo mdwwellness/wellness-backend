@@ -27,6 +27,11 @@ describe("add-on scheduling", () => {
     ]);
   });
 
+  it("on a completed visit every session becomes its own visit, even the same day", () => {
+    const booking = { status: "completed", physioSlot: { date: "2026-11-02" } };
+    expect(addonSessions({ slot: { date: "2026-11-02" }, sessions: 1 }, booking)[0].inVisit).toBe(false);
+  });
+
   it("needs a therapist, a date and time, and an interval for several sessions", async () => {
     expect(await checkAddonSchedule({}, { slot: { date: future(1), time: "10:00" } })).toMatchObject({ ok: false });
     const booking = { doctorId: "THR-1", physioSlot: { date: future(0) } };

@@ -40,9 +40,11 @@ export function addonSessions(rec: any, booking: any): { session: number; date: 
   const n = Number(rec.sessions) || 1;
   const every = Number(rec.intervalDays) || 0;
   const visitDay = visitDayKey(booking);
+  // A finished (or cancelled) visit can't take a session: all become visits.
+  const open = booking?.status !== "completed" && booking?.status !== "cancelled";
   return Array.from({ length: n }, (_, i) => {
     const date = addDays(rec.slot.date, i * every);
-    return { session: i + 1, date, inVisit: i === 0 && date === visitDay };
+    return { session: i + 1, date, inVisit: open && i === 0 && date === visitDay };
   });
 }
 
@@ -59,6 +61,7 @@ export async function checkAddonSchedule(
   input: ScheduleInput,
 ): Promise<{ ok: true; fields: Record<string, unknown> } | { ok: false; code: number; message: string }> {
   if (!booking.doctorId) return { ok: false, code: 400, message: "Assign a therapist to this booking first." };
+  if (booking.status === "cancelled") return { ok: false, code: 400, message: "This booking is cancelled." };
   const date = String(input.slot?.date ?? "");
   const time = String(input.slot?.time ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{1,2}:\d{2}$/.test(time)) {
