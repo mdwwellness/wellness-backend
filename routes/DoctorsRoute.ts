@@ -39,7 +39,7 @@ doctorRouter.delete(
   deleteTherapistSuperAdmin
 );
 
-doctorRouter.get("/:id/referrals", userAuth, getReferrals);
+doctorRouter.get("/:id/referrals", userAuth, superAdminAuth, getReferrals);
 doctorRouter.get("/:id", userAuth, getPersonalAppointments);
 // PUT stays open to THERAPIST_EDIT (which therapists hold) because the
 // therapist detail page has no role gate, so a therapist editing their own

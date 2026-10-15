@@ -9,6 +9,7 @@ import { logger } from "../lib/logger.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { canManageSplit, parseSplitPercent } from "../lib/therapistSplit.ts";
 import { withUniqueReferralCode } from "../lib/referralCode.ts";
+import { HIDDEN_FROM_THERAPISTS } from "../lib/bookingSource.ts";
 
 /**
  * The splitPercent part of a therapist update. Profile saves echo the whole
@@ -127,14 +128,11 @@ export async function addDoctor(req: Request, res: Response) {
 
 export async function getDoctors(req: Request, res: Response) {
   try {
-    const docs = await Doctor.find().sort({ createdAt: -1 }).lean().exec();
-    // A therapist sees only their own referral code: someone else's would let
-    // them claim bookings they didn't refer.
-    const ownUserId = String((req.user as any)?._id ?? "");
-    const doctorsDetails =
-      req.user?.role === "THERAPIST"
-        ? docs.map((d) => (String(d.userId) === ownUserId ? d : { ...d, referralCode: undefined }))
-        : docs;
+    // Referral codes are Super Admin only (hidden by default in the model).
+    const doctorsDetails = await Doctor.find()
+      .select(req.user?.role === "SUPER_ADMIN" ? "+referralCode" : "")
+      .sort({ createdAt: -1 })
+      .exec();
     if (!doctorsDetails) {
       return res.status(404).send({
         success: false,
@@ -194,7 +192,9 @@ export async function getPersonalAppointments(req: Request, res: Response) {
         message: "Id is required",
       })
     }
-    const data = await AppointmentBookingModel.find({ doctorId: id }).exec();
+    const data = await AppointmentBookingModel.find({ doctorId: id })
+      .select(req.user?.role === "THERAPIST" ? HIDDEN_FROM_THERAPISTS : "")
+      .exec();
 
     return res.status(200).send({
       success: true,
@@ -346,16 +346,13 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
 }
 
 /**
- * Bookings that came in through this therapist's referral code. Back office sees
- * anyone's; a therapist only their own.
+ * Bookings that came in through this therapist's referral code. Super Admin only
+ * (the route is behind superAdminAuth).
  */
 export async function getReferrals(req: Request, res: Response) {
   try {
     const doctor = await Doctor.findOne({ doctorId: req.params.id }, { userId: 1 }).lean();
     if (!doctor) return res.status(404).json({ success: false, message: "Therapist not found" });
-    if (req.user?.role === "THERAPIST" && String(doctor.userId) !== String((req.user as any)?._id)) {
-      return res.status(403).json({ success: false, message: "You can only see your own referrals." });
-    }
     const data = await AppointmentBookingModel.find({ referredByDoctorId: req.params.id })
       .select("enquiryId name service status paymentReceived createdAt")
       .sort({ createdAt: -1 })

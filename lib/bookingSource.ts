@@ -12,6 +12,10 @@ import { Doctor } from "../models/doctorsModel.ts";
 export const BOOKING_SOURCES = ["online", "whatsapp", "walk_in", "therapist"] as const;
 export type BookingSource = (typeof BOOKING_SOURCES)[number];
 
+// Therapists see nothing about referrals (client rule), so how a booking reached
+// us is left out of the bookings they load. A mongoose projection.
+export const HIDDEN_FROM_THERAPISTS = "-source -referredByDoctorId -referredByName";
+
 export type ResolvedBookingSource =
   | { ok: false; code: 400; message: string }
   | {

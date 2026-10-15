@@ -18,6 +18,7 @@ import {
 import { createBooking } from "../lib/bookingService.ts";
 import {
     BOOKING_SOURCES,
+    HIDDEN_FROM_THERAPISTS,
     isSourceChange,
     resolveBookingSource,
 } from "../lib/bookingSource.ts";
@@ -104,6 +105,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
             if (isExistingDoctor) {
                 const doctorId = isExistingDoctor.doctorId;
                 appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId })
+                    .select(HIDDEN_FROM_THERAPISTS)
                     .sort({ createdAt: -1 });
             } else {
                 appointmentdetails = [];

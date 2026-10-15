@@ -159,36 +159,29 @@ describe("referral codes", () => {
     { doctorId: "THR-2", userId: "u2", referralCode: "BBBBB" },
   ];
 
+  const select = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDoctorFind.mockReturnValue({ sort: () => ({ lean: () => ({ exec: () => Promise.resolve(list) }) }) });
+    select.mockReturnValue({ sort: () => ({ exec: () => Promise.resolve(list) }) });
+    mockDoctorFind.mockReturnValue({ select });
     mockBookingFind.mockReturnValue({ select: () => ({ sort: () => ({ limit: () => ({ lean: () => Promise.resolve([{ enquiryId: "ENQ-1" }]) }) }) }) });
   });
 
-  it("a therapist sees only their own code in the therapist list; admins see all", async () => {
-    const res = mockRes();
-    await getDoctors(as("THERAPIST", "u1"), res);
-    const sent = (res.send as any).mock.calls[0][0].data;
-    expect(sent.map((d: any) => d.referralCode)).toEqual(["AAAAA", undefined]);
-
-    const adminRes = mockRes();
-    await getDoctors(as("ADMIN", "x"), adminRes);
-    expect((adminRes.send as any).mock.calls[0][0].data.map((d: any) => d.referralCode)).toEqual(["AAAAA", "BBBBB"]);
+  it("only the Super Admin's therapist list asks for the hidden referral codes", async () => {
+    for (const role of ["THERAPIST", "ADMIN", "STAFF"]) {
+      await getDoctors(as(role, "u1"), mockRes());
+      expect(select).toHaveBeenLastCalledWith("");
+    }
+    await getDoctors(as("SUPER_ADMIN", "x"), mockRes());
+    expect(select).toHaveBeenLastCalledWith("+referralCode");
   });
 
-  it("referrals: own therapist and back office allowed, another therapist refused", async () => {
+  it("referrals list the bookings that came in through the therapist's code", async () => {
     mockDoctorFindOne.mockReturnValue({ lean: () => Promise.resolve({ userId: "u1" }) });
-    const own = mockRes();
-    await getReferrals(as("THERAPIST", "u1", { id: "THR-1" }), own);
-    expect(own.status).toHaveBeenCalledWith(200);
+    const res = mockRes();
+    await getReferrals(as("SUPER_ADMIN", "x", { id: "THR-1" }), res);
+    expect(res.status).toHaveBeenCalledWith(200);
     expect(mockBookingFind).toHaveBeenCalledWith({ referredByDoctorId: "THR-1" });
-
-    const other = mockRes();
-    await getReferrals(as("THERAPIST", "u2", { id: "THR-1" }), other);
-    expect(other.status).toHaveBeenCalledWith(403);
-
-    const staff = mockRes();
-    await getReferrals(as("CUSTOMER_CARE", "s1", { id: "THR-1" }), staff);
-    expect(staff.status).toHaveBeenCalledWith(200);
   });
 });
