@@ -4,7 +4,6 @@ import {
   addAppointmentRecommendation,
   confirmAppointmentRecommendation,
   sendAddonOtp,
-  setAddonPaymentStatus,
   completeSession,
   sendVisitOtp,
   verifyVisitOtp,
@@ -40,7 +39,6 @@ appointmentRouter.post("/:id/payments", userAuth, requireRole("SUPER_ADMIN", "AD
 appointmentRouter.post("/:id/recommendations", userAuth, addAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/otp", userAuth, sendAddonOtp);
 appointmentRouter.post("/:id/recommendations/confirm", userAuth, confirmAppointmentRecommendation);
-appointmentRouter.post("/:id/recommendations/payment", userAuth, setAddonPaymentStatus);
 // Session start: the office sends the code to the customer, and only the
 // assigned therapist can enter it - so a therapist can never start a session
 // without the customer reading the code back.

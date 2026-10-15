@@ -86,3 +86,35 @@ describe("unpaidBeforeComplete", () => {
     expect(unpaidBeforeComplete({ packageOriginId: "a", sessionNumber: 9 }, course).amount).toBe(1000);
   });
 });
+
+describe("recordPayment - add-ons", () => {
+  const row = {
+    _id: "b1",
+    quotedPrice: 1600,
+    paymentAmount: 1600,
+    recommendedServices: [{ serviceId: "S", recommendedAt: "t", serviceName: "Dry Needling", quotedPrice: 400, status: "confirmed" }],
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFindOneAndUpdate.mockReturnValue({ exec: () => Promise.resolve(row) });
+  });
+
+  it("goes to the add-on, part-payment allowed, logged with what it was for", async () => {
+    const r = await recordPayment({ row, addon: "S|t", amount: 150, method: "upi" });
+    expect(r.ok).toBe(true);
+    const [filter, update] = mockFindOneAndUpdate.mock.calls[0];
+    expect(filter.recommendedServices.$elemMatch).toMatchObject({ serviceId: "S", paidAmount: null });
+    expect(update.$set).toMatchObject({ "recommendedServices.$.paidAmount": 150, "recommendedServices.$.paymentCollected": false });
+    expect(update.$push.payments).toMatchObject({ amount: 150, for: "Dry Needling" });
+  });
+
+  it("an add-on visit with no key pays into its add-on on the booking", async () => {
+    mockFindById.mockReturnValue({ exec: () => Promise.resolve(row) });
+    await recordPayment({ row: { _id: "v2", addonOf: { bookingId: "b1", key: "S|t", session: 2 } }, amount: 400, method: "cash" });
+    expect(mockFindOneAndUpdate.mock.calls[0][1].$set["recommendedServices.$.paymentCollected"]).toBe(true);
+  });
+
+  it("won't take more than the add-on's balance", async () => {
+    expect(await recordPayment({ row, addon: "S|t", amount: 401, method: "cash" })).toMatchObject({ ok: false, code: 400 });
+  });
+});

@@ -36,6 +36,41 @@ export type CreateBookingResult =
   | { ok: true; folded: false; appointment: any };
 
 /**
+ * An existing, non-cancelled visit of this therapist on this date that starts
+ * at the same time or overlaps [start, end). Shared by every path that books a
+ * therapist (createBooking, add-on visits) so the rule lives in one place.
+ */
+export async function findTherapistClash(args: {
+  doctorId: string;
+  date: string | Date;
+  start: string;
+  end: string;
+  excludeId?: unknown;
+}): Promise<any> {
+  return AppointmentBooking.findOne({
+    doctorId: args.doctorId,
+    "slot.date": args.date,
+    status: { $ne: "cancelled" },
+    ...(args.excludeId ? { _id: { $ne: args.excludeId } } : {}),
+    $or: [
+      // Exact time match
+      { "slot.time": args.start },
+      // Overlapping time window
+      {
+        therapyStartTime: { $ne: null },
+        therapyEndTime: { $ne: null },
+        $expr: {
+          $and: [
+            { $lt: ["$therapyStartTime", args.end] },
+            { $gt: ["$therapyEndTime", args.start] },
+          ],
+        },
+      },
+    ],
+  }).exec();
+}
+
+/**
  * THE single sanctioned way to create a booking / enquiry. Every entry point
  * (dashboard, public patient site, enquiry conversion, and any future door)
  * funnels through here, so the side-effects - validation guards, ID
@@ -78,28 +113,13 @@ export async function createBooking(
   }
 
   // Double-booking guard - only when therapist + full slot are given.
-  // Checks for exact time match OR overlapping time windows.
   if (input.doctorId && input.slot?.date && input.slot?.time) {
-    const clash = await AppointmentBooking.findOne({
+    const clash = await findTherapistClash({
       doctorId: input.doctorId,
-      "slot.date": input.slot.date,
-      status: { $ne: "cancelled" },
-      $or: [
-        // Exact time match
-        { "slot.time": input.slot.time },
-        // Overlapping time window: existing booking's time window overlaps with new booking
-        {
-          therapyStartTime: { $ne: null },
-          therapyEndTime: { $ne: null },
-          $expr: {
-            $and: [
-              { $lt: ["$therapyStartTime", input.therapyEndTime || input.slot.time] },
-              { $gt: ["$therapyEndTime", input.therapyStartTime || input.slot.time] },
-            ],
-          },
-        },
-      ],
-    }).exec();
+      date: input.slot.date,
+      start: input.therapyStartTime || input.slot.time,
+      end: input.therapyEndTime || input.slot.time,
+    });
     if (clash) {
       return {
         ok: false,

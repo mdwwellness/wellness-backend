@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import { addonPaid as addonPaidOf } from "./bookingMoney.ts";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import Customer from "../models/customerModel.ts";
 import Invoice from "../models/invoiceModel.ts";
@@ -205,6 +206,8 @@ type MergedAddon = {
   description: string;
   price: number;
   paymentCollected: boolean;
+  /** Paid so far (part-payments allowed). */
+  paid: number;
 };
 
 /**
@@ -228,6 +231,7 @@ function mergeAddonItems(
       description: l.description,
       price: safeNumber(l.price),
       paymentCollected: !!l.paymentCollected,
+      paid: l.paymentCollected ? safeNumber(l.price) : 0,
     });
   }
 
@@ -240,6 +244,7 @@ function mergeAddonItems(
       description: `Add-on: ${rec.serviceName}`,
       price: safeNumber(rec.quotedPrice),
       paymentCollected: !!rec.paymentCollected,
+      paid: Math.min(safeNumber(rec.quotedPrice), safeNumber(addonPaidOf(rec))),
     });
   }
 
@@ -416,8 +421,7 @@ async function createInvoiceFromAppointment(args: {
 
   const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
   const addonPaid = mergeAddonItems(appointment)
-    .filter((a) => a.paymentCollected)
-    .reduce((s, a) => s + a.price, 0);
+    .reduce((s, a) => s + a.paid, 0);
   const consultPaid =
     hasConsultationCharge(appointment) && appointment.consultationCompleted
       ? CONSULT_FEE
@@ -549,8 +553,7 @@ export async function syncInvoiceFromAppointment(args: {
   const total = items_subtotal;
   const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
   const addonPaid = mergeAddonItems(appointment, existing.locked_addon_items)
-    .filter((a) => a.paymentCollected)
-    .reduce((s, a) => s + a.price, 0);
+    .reduce((s, a) => s + a.paid, 0);
   const consultPaid =
     hasConsultationCharge(appointment) && appointment.consultationCompleted
       ? CONSULT_FEE

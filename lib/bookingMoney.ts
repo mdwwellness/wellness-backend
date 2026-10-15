@@ -60,6 +60,10 @@ export function payableLedger(appointment: {
   });
 }
 
+/** Paid so far on an add-on (older add-ons only had a collected flag). */
+export const addonPaid = (r: { quotedPrice?: number | null; paidAmount?: number | null; paymentCollected?: boolean | null }) =>
+  r?.paidAmount ?? (r?.paymentCollected ? Number(r.quotedPrice) || 0 : 0);
+
 /** Everything sold on this booking with payment state. */
 export function bookingLedger(appointment: {
   quotedPrice?: number;
@@ -72,6 +76,7 @@ export function bookingLedger(appointment: {
     status?: string;
     recommendedAt: string;
     paymentCollected?: boolean;
+    paidAmount?: number | null;
   }>;
   bookingKind?: string;
   totalSessions?: number;
@@ -98,13 +103,18 @@ export function bookingLedger(appointment: {
   }
 
   for (const r of appointment.recommendedServices ?? []) {
-    const confirmed = r.status === "confirmed";
-    lines.push({
-      key: `${r.serviceId}-${r.recommendedAt}`,
-      label: r.serviceName,
-      amount: r.quotedPrice ?? 0,
-      state: !confirmed ? "pending" : r.paymentCollected ? "paid" : "due",
-    });
+    const key = `${r.serviceId}-${r.recommendedAt}`;
+    const price = r.quotedPrice ?? 0;
+    if (r.status !== "confirmed") {
+      lines.push({ key, label: r.serviceName, amount: price, state: "pending" });
+      continue;
+    }
+    // Part-paid add-on: paid share and balance, like the booking line.
+    const paid = Math.min(price, addonPaid(r));
+    if (paid > 0) lines.push({ key: `${key}-paid`, label: r.serviceName, amount: paid, state: "paid" });
+    if (paid < price) {
+      lines.push({ key, label: paid > 0 ? `${r.serviceName} - balance` : r.serviceName, amount: price - paid, state: "due" });
+    }
   }
 
   const sum = (s: LedgerLine["state"]) =>

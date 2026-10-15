@@ -24,7 +24,8 @@ import {
 import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
 import { applyLockedFields } from "../lib/lockedFields.ts";
-import { isAssignedTherapist, moneyRowFor, paidNeededBeforeVisit, recordPayment, unpaidBeforeComplete } from "../lib/payments.ts";
+import { checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
+import { addonKey, dueForVisit, isAssignedTherapist, moneyRowFor, recordPayment, shortBeforeStart, unpaidBeforeComplete } from "../lib/payments.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 
 // Back-office roles that see every appointment / enquiry record.
@@ -152,7 +153,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 export const addAppointmentRecommendation = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { serviceId, serviceName, category, quotedPrice, sessions, slot } = req.body ?? {};
+        const { serviceId, serviceName, category, quotedPrice, sessions, slot, durationMin, intervalDays } = req.body ?? {};
 
         if (!serviceId || typeof serviceId !== "string") {
             return res.status(400).send({
@@ -189,6 +190,17 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
             });
         }
 
+        // When it will be done, always by this booking's therapist; no clashes.
+        const schedule = await checkAddonSchedule(appointment, {
+            slot,
+            durationMin,
+            intervalDays,
+            sessions: typeof sessions === "number" ? sessions : undefined,
+        });
+        if (!schedule.ok) {
+            return res.status(schedule.code).send({ success: false, message: schedule.message });
+        }
+
         const actorName = (req.user as any)?.userfName
             ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
             : (req.user as any)?.userEmail ?? "Therapist";
@@ -199,10 +211,7 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
             category: category ?? "",
             quotedPrice,
             ...(typeof sessions === "number" && sessions > 1 ? { sessions } : {}),
-            slot:
-                slot?.date || slot?.time
-                    ? { date: slot.date ?? "", time: slot.time ?? "" }
-                    : undefined,
+            ...schedule.fields,
             recommendedAt: new Date().toISOString(),
             recommendedBy: actorName,
             status: "pending",
@@ -251,9 +260,6 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
     }
 };
 
-/** Key pinning an add-on OTP to one specific recommendation. */
-const addonKey = (serviceId: string, recommendedAt: string) =>
-    `${serviceId}|${recommendedAt}`;
 
 /**
  * Send a consent code for ONE recommended add-on.
@@ -390,13 +396,17 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
             name: actorName,
             email: (req.user as any)?.userEmail,
         };
+        // Sessions on another day become their own visits (same therapist).
+        const visits = updated ? await createAddonVisits(updated, updated.recommendedServices[idx], actorName) : [];
         if (updated) {
             await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
         }
 
         return res.status(200).send({
             success: true,
-            message: "Add-on confirmed for this visit",
+            message: visits.length
+                ? `Add-on confirmed - ${visits.length} visit${visits.length === 1 ? "" : "s"} scheduled`
+                : "Add-on confirmed for this visit",
             data: updated,
         });
     } catch (error: any) {
@@ -407,95 +417,6 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
     }
 };
 
-export const setAddonPaymentStatus = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        const { serviceId, recommendedAt, collected } = req.body ?? {};
-
-        if (!serviceId || typeof serviceId !== "string") {
-            return res.status(400).send({
-                success: false,
-                message: "serviceId is required.",
-            });
-        }
-        if (!recommendedAt || typeof recommendedAt !== "string") {
-            return res.status(400).send({
-                success: false,
-                message: "recommendedAt is required.",
-            });
-        }
-        if (typeof collected !== "boolean") {
-            return res.status(400).send({
-                success: false,
-                message: "collected must be a boolean.",
-            });
-        }
-
-        const appointment = await AppointmentBooking.findById(id).exec();
-        if (!appointment) {
-            return res.status(404).send({
-                success: false,
-                message: "Appointment not found",
-            });
-        }
-
-        const recs = appointment.recommendedServices ?? [];
-        const idx = recs.findIndex(
-            (r) => r.serviceId === serviceId && r.recommendedAt === recommendedAt,
-        );
-        if (idx < 0) {
-            return res.status(404).send({
-                success: false,
-                message: "Recommendation not found on this visit.",
-            });
-        }
-
-        const actorName = (req.user as any)?.userfName
-            ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
-            : (req.user as any)?.userEmail ?? "Staff";
-
-        const path = `recommendedServices.${idx}`;
-        const updated = await AppointmentBooking.findByIdAndUpdate(
-            id,
-            {
-                $set: {
-                    [`${path}.paymentCollected`]: collected,
-                    [`${path}.paymentCollectedAt`]: collected
-                        ? new Date().toISOString()
-                        : null,
-                },
-                $push: {
-                    activityLog: {
-                        at: new Date().toISOString(),
-                        userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
-                        name: actorName,
-                        action: `${collected ? "Marked" : "Unmarked"} add-on payment collected: ${recs[idx].serviceName}`,
-                    },
-                },
-            },
-            { new: true },
-        ).exec();
-
-        const actor = {
-            name: actorName,
-            email: (req.user as any)?.userEmail,
-        };
-        if (updated) {
-            await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
-        }
-
-        return res.status(200).send({
-            success: true,
-            message: "Add-on payment status updated",
-            data: updated,
-        });
-    } catch (error: any) {
-        return res.status(500).send({
-            success: false,
-            message: error.message,
-        });
-    }
-};
 
 // ── Per-visit proof-of-presence OTP ──────────────────────────────────────────
 // The executive taps "send" → a fresh code is stored (hashed, 15-min expiry) and
@@ -550,7 +471,7 @@ export const addPayment = async (req: Request, res: Response) => {
     if (user?.role === "THERAPIST" && !(await isAssignedTherapist(user, row))) {
       return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
     }
-    const result = await recordPayment({ row, amount: req.body?.amount, method: req.body?.method, user });
+    const result = await recordPayment({ row, amount: req.body?.amount, method: req.body?.method, user, addon: req.body?.addon });
     if (!result.ok) {
       return res.status(result.code).send({ success: false, message: result.message });
     }
@@ -584,10 +505,10 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
     // Collect at least today's session before it starts (before any attempt is
     // used up, so an unpaid visit doesn't burn the code's tries).
     const money = await moneyRowFor(appt);
-    const short = paidNeededBeforeVisit(appt, money) - (Number(money.paymentAmount) || 0);
+    const short = shortBeforeStart(appt, money);
     if (short > 0) {
       // due = everything still owed, so the customer can pay ahead if they want.
-      const due = Math.max(0, (Number(money.quotedPrice) || 0) - (Number(money.paymentAmount) || 0));
+      const due = dueForVisit(appt, money);
       return res.status(402).send({ success: false, message: `Collect ₹${short} before starting this session.`, short, due });
     }
 
@@ -657,8 +578,10 @@ export const completeSession = async (req: Request, res: Response) => {
         // Total visits: a catalogue package's count, else an ad-hoc booking's
         // stable session count (totalSessions). sessionNumber is NOT used - it's
         // repurposed below as the current-session pointer.
-        const total =
-            service?.packageCount ?? existing.totalSessions ?? 1;
+        // An add-on visit (addonOf) is one session of that add-on: a single visit.
+        const total = existing.addonOf?.bookingId
+            ? 1
+            : service?.packageCount ?? existing.totalSessions ?? 1;
 
         // Lock the therapist's split in at the first completed session, so a
         // later change to their % never rewrites this booking's earnings.

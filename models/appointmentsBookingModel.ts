@@ -78,6 +78,14 @@ const AppointmentBookingSchema = new Schema({
     packageOriginId: {
         type: String,
     },
+    // A visit created for a later session of a recommended add-on: which
+    // booking and add-on it belongs to, and which of its sessions it is. Its
+    // money lives on that add-on (see lib/payments.ts).
+    addonOf: {
+        bookingId: { type: String },
+        key: { type: String },
+        session: { type: Number },
+    },
     // ── Vitals Check sub-selections (e.g. "Blood Pressure (BP)", "Blood Sugar",
     //    "Other: ..."). Empty for non-vitals services. ──
     vitals: [{ type: String }],
@@ -236,6 +244,8 @@ const AppointmentBookingSchema = new Schema({
             at: { type: Date, required: true },
             by: { type: String },
             byRole: { type: String },
+            // Set when the payment was for an add-on, not the booking itself.
+            for: { type: String },
             _id: false,
         },
     ],
@@ -392,10 +402,19 @@ const AppointmentBookingSchema = new Schema({
             category: { type: String },
             quotedPrice: { type: Number, required: true },
             sessions: { type: Number },
+            // When it's done: first session's date/time and length; further
+            // sessions every intervalDays. Always the booking's own therapist.
             slot: {
                 date: { type: String },
                 time: { type: String },
             },
+            durationMin: { type: Number },
+            intervalDays: { type: Number },
+            // First session is part of the visit it was recommended on (same
+            // day); later sessions become their own visits (addonOf).
+            firstInVisit: { type: Boolean },
+            // Money received for this add-on so far (part-payments allowed).
+            paidAmount: { type: Number },
             status: {
                 type: String,
                 enum: ["pending", "confirmed"],
