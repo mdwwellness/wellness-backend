@@ -24,7 +24,7 @@ import {
 import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
 import { applyLockedFields } from "../lib/lockedFields.ts";
-import { isAssignedTherapist, moneyRowFor, paidNeededBeforeVisit, recordPayment } from "../lib/payments.ts";
+import { isAssignedTherapist, moneyRowFor, paidNeededBeforeVisit, recordPayment, unpaidBeforeComplete } from "../lib/payments.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 
 // Back-office roles that see every appointment / enquiry record.
@@ -634,6 +634,17 @@ export const completeSession = async (req: Request, res: Response) => {
             return res.status(400).send({
                 success: false,
                 message: "Verify the visit OTP before checkout.",
+            });
+        }
+
+        // Everything this visit owes is collected before it closes - a single
+        // or last visit has no later visit to collect it on.
+        const unpaid = unpaidBeforeComplete(existing, await moneyRowFor(existing));
+        if (unpaid.amount > 0) {
+            return res.status(402).send({
+                success: false,
+                message: `Collect ₹${unpaid.amount}${unpaid.addons.length ? ` (incl. ${unpaid.addons.join(", ")})` : ""} before completing this visit - record it in Billing.`,
+                short: unpaid.amount,
             });
         }
 

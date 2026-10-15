@@ -48,6 +48,22 @@ export function paidNeededBeforeVisit(visitRow: any, moneyRow: any): number {
   return Math.min(price, Math.round((price / total) * session));
 }
 
+/**
+ * What must still be collected before this visit can be completed: its share of
+ * the booking (the full fee on a single or last visit) plus every confirmed
+ * add-on on this visit that isn't paid. Zero means it can be completed.
+ * The start check only covers the booking share; add-ons are usually added
+ * during the visit, so they're checked here.
+ */
+export function unpaidBeforeComplete(visitRow: any, moneyRow: any): { amount: number; addons: string[] } {
+  const bookingShort = Math.max(0, paidNeededBeforeVisit(visitRow, moneyRow) - (Number(moneyRow?.paymentAmount) || 0));
+  const addons = (visitRow?.recommendedServices ?? []).filter(
+    (r: any) => r.status === "confirmed" && !r.paymentCollected,
+  );
+  const addonShort = addons.reduce((s: number, r: any) => s + (Number(r.quotedPrice) || 0), 0);
+  return { amount: bookingShort + addonShort, addons: addons.map((r: any) => r.serviceName) };
+}
+
 export type RecordPaymentResult =
   | { ok: true; booking: any }
   | { ok: false; code: number; message: string };

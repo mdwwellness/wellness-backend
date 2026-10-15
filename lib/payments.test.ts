@@ -9,7 +9,7 @@ vi.mock("../models/appointmentsBookingModel.ts", () => ({
 }));
 vi.mock("../models/doctorsModel.ts", () => ({ Doctor: { findOne: vi.fn() } }));
 
-import { paidNeededBeforeVisit, recordPayment } from "./payments.ts";
+import { paidNeededBeforeVisit, recordPayment, unpaidBeforeComplete } from "./payments.ts";
 
 describe("paidNeededBeforeVisit", () => {
   it("a single visit needs its full fee", () => {
@@ -56,5 +56,33 @@ describe("recordPayment", () => {
     mockFindById.mockReturnValue({ exec: () => Promise.resolve({ _id: "origin", quotedPrice: 9000, paymentAmount: 0 }) });
     await recordPayment({ row: { _id: "s3", packageOriginId: "origin" }, amount: 1000, method: "cash" });
     expect(mockFindOneAndUpdate.mock.calls[0][0]._id).toBe("origin");
+  });
+});
+
+describe("unpaidBeforeComplete", () => {
+  it("ENQ-0102: a paid home visit with an unpaid confirmed add-on can't be completed", () => {
+    const visit = {
+      quotedPrice: 1600,
+      paymentAmount: 1600,
+      recommendedServices: [
+        { serviceName: "Dry Needling", quotedPrice: 400, status: "confirmed", paymentCollected: false },
+        { serviceName: "Not agreed", quotedPrice: 999, status: "pending" },
+      ],
+    };
+    expect(unpaidBeforeComplete(visit, visit)).toEqual({ amount: 400, addons: ["Dry Needling"] });
+  });
+
+  it("clears once the add-on is collected", () => {
+    const visit = {
+      quotedPrice: 1600,
+      paymentAmount: 1600,
+      recommendedServices: [{ serviceName: "Dry Needling", quotedPrice: 400, status: "confirmed", paymentCollected: true }],
+    };
+    expect(unpaidBeforeComplete(visit, visit).amount).toBe(0);
+  });
+
+  it("the last session of a course needs the whole course paid", () => {
+    const course = { quotedPrice: 9000, totalSessions: 9, paymentAmount: 8000 };
+    expect(unpaidBeforeComplete({ packageOriginId: "a", sessionNumber: 9 }, course).amount).toBe(1000);
   });
 });
