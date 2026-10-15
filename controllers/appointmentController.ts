@@ -27,6 +27,7 @@ import { applyLockedFields } from "../lib/lockedFields.ts";
 import { checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
 import { addonKey, courseSessionOf, dueForVisit, isAssignedTherapist, moneyRowFor, recordPayment, shortBeforeStart, unpaidBeforeComplete } from "../lib/payments.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
+import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
 
 // Back-office roles that see every appointment / enquiry record.
 // THERAPIST is intentionally NOT in this set - therapists see only their
@@ -789,6 +790,10 @@ export const updateAppointment = async (req: Request, res: Response) => {
         delete (updateData as any).discountAmount;
         delete (updateData as any).discountType;
         delete (updateData as any).promoCode;
+        // Gender is one of a fixed few, and the update below skips schema checks.
+        const gender = toGender(updateData.gender);
+        if (gender) updateData.gender = gender;
+        else delete updateData.gender;
 
         const current = await AppointmentBooking.findById(id).exec();
         if (!current) {
@@ -972,6 +977,19 @@ export const updateAppointment = async (req: Request, res: Response) => {
         }
 
         // Auto-generate / sync invoice (session completed, consult booked, etc.).
+        // An office correction of gender or age is about the person, so it also
+        // updates the customer record (bookings alone only fill its blanks).
+        // Only a genuine change counts: whole-record PUTs echo stored values.
+        if (user?.role !== "THERAPIST" && cur.customer_id) {
+            const person: Record<string, unknown> = {};
+            if (gender && gender !== cur.gender) person.gender = gender;
+            const age = toAge(updateData.age);
+            if (age && age !== cur.age) person.birthYear = birthYearFrom(age);
+            if (Object.keys(person).length) {
+                await Customer.updateOne({ customer_id: cur.customer_id }, { $set: person });
+            }
+        }
+
         const actor = {
             name: user?.userfName
                 ? `${user.userfName ?? ""} ${user.userlName ?? ""}`.trim()
@@ -1024,6 +1042,8 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             note,
             service,
             vitals,
+            age,
+            gender,
         } = req.body;
 
         const input = {
@@ -1036,6 +1056,9 @@ export const addPublicEnquiry = async (req: Request, res: Response) => {
             note: note || undefined,
             service: service || undefined,
             vitals: Array.isArray(vitals) && vitals.length ? vitals : undefined,
+            // Junk or "Prefer not to say" is simply not stored.
+            age: toAge(age),
+            gender: toGender(gender),
             status: "enquiry",
         };
 

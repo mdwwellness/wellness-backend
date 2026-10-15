@@ -18,7 +18,7 @@ export async function getCustomers(req: Request, res: Response) {
       const customers = await Customer.find()
         .sort({ createdAt: -1 })
         .limit(500)
-        .select("customer_id name phone email address notes createdAt updatedAt")
+        .select("customer_id name phone email address gender birthYear dob notes createdAt updatedAt")
         .exec();
       return res.status(200).send({ success: true, data: customers });
     }
@@ -35,7 +35,7 @@ export async function getCustomers(req: Request, res: Response) {
 
     const customers = await Customer.find(query)
       .limit(50)
-      .select("customer_id name phone email address notes createdAt updatedAt")
+      .select("customer_id name phone email address gender birthYear dob notes createdAt updatedAt")
       .exec();
     return res.status(200).send({ success: true, data: customers });
   } catch (err: any) {

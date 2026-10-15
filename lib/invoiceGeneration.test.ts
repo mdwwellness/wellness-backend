@@ -23,6 +23,10 @@ vi.mock("../models/customerModel.ts", () => ({
         },
       };
     }
+    static async updateOne(filter: { _id: unknown }, update: { $set: object }) {
+      Object.assign(m.stored.find((c) => c._id === filter._id), update.$set);
+    }
+    _id = Symbol("id");
     constructor(fields: object) {
       Object.assign(this, fields);
     }
@@ -40,6 +44,7 @@ vi.mock("./invoicePdf.ts", () => ({ ensureInvoicePdfGeneratedAndUploaded: vi.fn(
 vi.mock("./logger.ts", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 import { ensureCustomerForAppointment } from "./invoiceGeneration.ts";
+import { todayInIndia } from "./personDetails.ts";
 
 const ASHA = { phonenumber: 9876543210, name: "Asha Verma" };
 
@@ -91,5 +96,28 @@ describe("ensureCustomerForAppointment", () => {
     expect(first.status).toBe("rejected");
     expect(second).toMatchObject({ status: "fulfilled", value: { name: "Asha Verma" } });
     expect(m.stored).toHaveLength(1);
+  });
+
+  it("a booking fills the customer's missing details but never overwrites them", async () => {
+    const at = "2026-10-16T05:00:00Z";
+    await ensureCustomerForAppointment({ ...ASHA, gender: "female", age: 30, createdAt: at });
+    await ensureCustomerForAppointment({ ...ASHA, gender: "male", age: 50, email: "a@x.com", createdAt: at });
+
+    expect(m.stored).toHaveLength(1);
+    expect(m.stored[0]).toMatchObject({ gender: "female", birthYear: 1996, email: "a@x.com" });
+  });
+
+  it("a new booking for a known customer takes their gender and age", async () => {
+    await ensureCustomerForAppointment({ ...ASHA, gender: "female", age: 30, createdAt: "2026-10-16T05:00:00Z" });
+    const booking: any = { ...ASHA, save: vi.fn() };
+
+    await ensureCustomerForAppointment(booking);
+
+    expect(booking).toMatchObject({
+      customer_id: "CUST-0001",
+      gender: "female",
+      age: Number(todayInIndia().slice(0, 4)) - 1996,
+    });
+    expect(booking.save).toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import mongoose, { Schema } from "mongoose";
+import { GENDERS } from "../lib/personDetails.ts";
 
 const AppointmentBookingSchema = new Schema({
     // ── Required for every record ──
@@ -92,6 +93,8 @@ const AppointmentBookingSchema = new Schema({
     age: {
         type: Number,
     },
+    // Copied from / onto the customer record (lib/personDetails.ts).
+    gender: { type: String, enum: GENDERS },
     email: {
         type: String,
     },

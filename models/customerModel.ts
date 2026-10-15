@@ -1,6 +1,8 @@
 import mongoose, { Schema } from "mongoose";
 
-export const GENDERS = ["male", "female", "other"] as const;
+import { GENDERS } from "../lib/personDetails.ts";
+
+export { GENDERS };
 
 const customerSchema = new Schema(
   {
@@ -41,6 +43,8 @@ const customerSchema = new Schema(
     },
     gender: { type: String, enum: GENDERS },
     dob: Date,
+    // From an age given on a booking (this year minus the age). dob wins when set.
+    birthYear: Number,
     city: String,
     pincode: String,
     emergencyContact: {

@@ -80,6 +80,16 @@ describe("createBooking: repeat folding", () => {
     expect(m.created).toHaveLength(0);
   });
 
+  it("a repeat fills the lead's missing gender and age, and passes them to the customer", async () => {
+    const existing = lead({ age: 41 });
+    m.find.mockResolvedValue([existing]);
+
+    await createBooking(request({ gender: "female", age: 30 }), { foldOpenRepeats: true });
+
+    expect(existing).toMatchObject({ gender: "female", age: 41 });
+    expect(m.ensureCustomer).toHaveBeenCalledWith(existing);
+  });
+
   it("creates a new lead for a different service on the same phone and name", async () => {
     m.find.mockResolvedValue([lead({ service: "Home Therapy" })]);
 

@@ -7,6 +7,7 @@ import Service from "../models/serviceModel.ts";
 import { nextSequence, nextYearlySequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { OFFERINGS } from "./offerings.ts";
+import { birthYearFrom, customerAge, toGender } from "./personDetails.ts";
 
 type Actor = {
   name?: string;
@@ -95,8 +96,30 @@ export async function ensureCustomerForAppointment(
     return created;
   });
 
+  // The customer record is the person: a booking fills in what it's missing but
+  // never overwrites it (the public form has no login, so anyone can type any
+  // number). Staff corrections go through the appointment PUT instead.
+  try {
+    const gender = toGender(appointment.gender);
+    const birthYear = birthYearFrom(appointment.age, appointment.createdAt);
+    const fill: Record<string, unknown> = {};
+    if (!customer.email && email) fill.email = email;
+    if (!customer.address && address) fill.address = address;
+    if (!customer.gender && gender) fill.gender = gender;
+    if (!customer.dob && !customer.birthYear && birthYear) fill.birthYear = birthYear;
+    if (Object.keys(fill).length) {
+      await Customer.updateOne({ _id: customer._id }, { $set: fill });
+      Object.assign(customer, fill);
+    }
+  } catch (err) {
+    // Non-fatal: the booking and its customer link matter more than the extras.
+    logger.warn("Customer details fill failed", { customer_id: customer.customer_id, err: String(err) });
+  }
+
   // Backfill the customer ID onto the appointment doc so every appointment
   // carries its own customer_id (visible in the dashboard without a phone join).
+  // On that first link the booking also takes the gender and age the customer
+  // already has, so a returning customer's details show on the new lead.
   // Only when passed a live document - manual invoices pass plain objects.
   try {
     if (
@@ -105,6 +128,8 @@ export async function ensureCustomerForAppointment(
       appointment.customer_id !== customer.customer_id
     ) {
       appointment.customer_id = customer.customer_id;
+      if (!appointment.gender && customer.gender) appointment.gender = customer.gender;
+      if (!appointment.age) appointment.age = customerAge(customer);
       await appointment.save();
     }
   } catch {

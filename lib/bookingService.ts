@@ -218,7 +218,11 @@ export async function createBooking(
         name,
         action,
       });
+      // A repeat can still bring details the first request didn't have.
+      if (!existing.gender && input.gender) existing.gender = input.gender;
+      if (!existing.age && input.age) existing.age = input.age;
       await existing.save();
+      await ensureCustomerForAppointment(existing);
       logger.info("Booking repeat folded into existing lead", {
         enquiryId: existing.enquiryId,
         repeatCount,

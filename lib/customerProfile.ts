@@ -3,10 +3,9 @@ import { validPersonName } from "./customerAccount.ts";
 import type { Account } from "./customerAccount.ts";
 import { ensureCustomerForAppointment } from "./invoiceGeneration.ts";
 import { logger } from "./logger.ts";
+import { customerAge, todayInIndia, type Gender } from "./personDetails.ts";
 import { fromE164, parseIndianMobile } from "./phone.ts";
 import { isPlainObject } from "./validation.ts";
-
-type Gender = (typeof GENDERS)[number];
 
 export type CustomerProfile = {
   accountId: string;
@@ -45,8 +44,6 @@ const WELLNESS_FIELDS = ["gender", "dob", "address", "city", "pincode", "emergen
 const PATCH_FIELDS: readonly string[] = ["name", "email", ...WELLNESS_FIELDS];
 const CONTACT_FIELDS: readonly string[] = ["name", "phone", "relation"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-// India has no DST, so a fixed +05:30 gives the local calendar date.
-const IST_OFFSET_MS = 330 * 60_000;
 
 // Customer.accountId stores the account's _id as a string.
 export async function findCustomerForAccount(account: Account) {
@@ -159,7 +156,7 @@ export function toProfile(account: Account, customer: any | null): CustomerProfi
     email: account.email || customer?.email || null,
     gender: customer?.gender ?? null,
     dob,
-    age: dob ? ageOn(dob, todayInIndia()) : null,
+    age: customerAge(customer) ?? null,
     address: customer?.address || null,
     city: customer?.city || null,
     pincode: customer?.pincode || null,
@@ -176,17 +173,6 @@ export function toProfile(account: Account, customer: any | null): CustomerProfi
 function byCustomerId(customerId: string) {
   if (!customerId) throw new Error("customerId is required");
   return { customer_id: customerId };
-}
-
-function todayInIndia(): string {
-  return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 10);
-}
-
-// Completed years between two YYYY-MM-DD dates. Comparing "MM-DD" strings makes
-// a 29 Feb birthday count from 1 Mar in non-leap years.
-function ageOn(dob: string, today: string): number {
-  const years = Number(today.slice(0, 4)) - Number(dob.slice(0, 4));
-  return today.slice(5) < dob.slice(5) ? years - 1 : years;
 }
 
 class InvalidField extends Error {}
