@@ -2,6 +2,7 @@ import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { nextSequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { resolveBookingSource } from "./bookingSource.ts";
+import { cataloguePrice, isIntake } from "./lockedFields.ts";
 import {
   ensureCustomerForAppointment,
   maybeCreateInvoiceForAppointment,
@@ -108,17 +109,38 @@ export async function createBooking(
     }
   }
 
-  // Pay-first: never assign a therapist before payment is cleared. Self-gating -
-  // only fires when a therapist is on the payload, so a bare enquiry passes.
-  // Mirrors the guard in updateAppointment; kept here so EVERY create path
-  // (dashboard modal, public form, conversion) inherits it and none can skip it.
-  if (input.doctorId && input.paymentReceived !== true) {
-    return {
-      ok: false,
-      code: 400,
-      message: "Record the payment before assigning a therapist.",
-    };
+  // No manual price changes: no discounts, and an intake's fee comes from the
+  // Services catalogue, never the client.
+  // ponytail: course prices are still computed client-side from the rate table.
+  input = { ...input };
+  delete input.discountAmount;
+  delete input.discountType;
+  delete input.promoCode;
+  delete input.originalPrice;
+  if (input.typeOfappointment && isIntake(input)) {
+    const fee = await cataloguePrice(input.typeOfappointment);
+    if (fee !== undefined) input.quotedPrice = fee;
   }
+
+  // Money taken at booking becomes the first entry in `payments` (part-payment
+  // allowed, never above the price). Later money goes through lib/payments.ts.
+  const price = Number(input.quotedPrice) || 0;
+  const firstPayment = Math.min(Number(input.paymentAmount) || 0, price);
+  delete input.paymentAmount;
+  delete input.paymentReceived;
+  delete input.paymentReceivedAt;
+  delete input.payments;
+  const paymentFields =
+    firstPayment > 0
+      ? {
+          paymentAmount: firstPayment,
+          paymentReceived: firstPayment >= price,
+          ...(firstPayment >= price ? { paymentReceivedAt: new Date() } : {}),
+          payments: [
+            { amount: firstPayment, method: input.paymentMethod, at: new Date(), by: opts.actor?.name ?? "", byRole: "" },
+          ],
+        }
+      : {};
 
   // An unpriced booking generates NO invoice at all, so it would silently never
   // bill. Self-gating the same way: only fires once a therapist is on the
@@ -129,25 +151,6 @@ export async function createBooking(
       code: 400,
       message: "Set the booking price before assigning a therapist.",
     };
-  }
-
-  // Discount validation: prevent negative revenue
-  if (input.discountAmount && input.discountAmount > 0) {
-    const effectiveOriginal = input.originalPrice ?? input.quotedPrice ?? 0;
-    if (input.discountType === "percent" && input.discountAmount > 100) {
-      return {
-        ok: false,
-        code: 400,
-        message: "Discount percentage cannot exceed 100%.",
-      };
-    }
-    if (input.discountType === "fixed" && input.discountAmount > effectiveOriginal) {
-      return {
-        ok: false,
-        code: 400,
-        message: "Discount amount cannot exceed the original price.",
-      };
-    }
   }
 
   // Repeat folding for open leads (opt-in).
@@ -232,6 +235,7 @@ export async function createBooking(
     ...sourceFields,
     // Locked in by the server when the booking completes, never client-sent.
     therapistSplitPercent: undefined,
+    ...paymentFields,
   });
   await appointment.save();
   logger.info("Booking created", {

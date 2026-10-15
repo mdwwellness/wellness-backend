@@ -219,6 +219,9 @@ const AppointmentBookingSchema = new Schema({
     },
 
     // ── Funnel checkpoint - payment (patient → clinic) ──
+    // Server-managed (see lib/payments.ts): paymentAmount is the running total
+    // of `payments`, and paymentReceived means fully paid. Part-payments leave
+    // the rest due.
     paymentReceived: {
         type: Boolean,
         default: false,
@@ -226,6 +229,16 @@ const AppointmentBookingSchema = new Schema({
     paymentAmount: {
         type: Number,
     },
+    payments: [
+        {
+            amount: { type: Number, required: true },
+            method: { type: String },
+            at: { type: Date, required: true },
+            by: { type: String },
+            byRole: { type: String },
+            _id: false,
+        },
+    ],
     paymentMethod: {
         type: String,
         enum: ["cash", "upi", "card", "bank", "other"],

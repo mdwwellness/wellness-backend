@@ -24,6 +24,7 @@ import {
 import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
 import { applyLockedFields } from "../lib/lockedFields.ts";
+import { isAssignedTherapist, moneyRowFor, paidNeededBeforeVisit, recordPayment } from "../lib/payments.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 
 // Back-office roles that see every appointment / enquiry record.
@@ -535,6 +536,35 @@ export const sendVisitOtp = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Record money received (part or full). Office roles on any booking; the
+ * assigned therapist on their own visit (cash at the door). Never more than due.
+ */
+export const addPayment = async (req: Request, res: Response) => {
+  try {
+    const row = await AppointmentBooking.findById(req.params.id).exec();
+    if (!row) {
+      return res.status(404).send({ success: false, message: "Appointment not found" });
+    }
+    const user = req.user as any;
+    if (user?.role === "THERAPIST" && !(await isAssignedTherapist(user, row))) {
+      return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
+    }
+    const result = await recordPayment({ row, amount: req.body?.amount, method: req.body?.method, user });
+    if (!result.ok) {
+      return res.status(result.code).send({ success: false, message: result.message });
+    }
+    await safeSyncInvoiceFromAppointment({
+      appointment: result.booking,
+      actor: { name: result.booking.payments?.at(-1)?.by, email: user?.userEmail },
+    });
+    return res.status(200).send({ success: true, message: "Payment recorded", data: result.booking });
+  } catch (error: any) {
+    console.error("[addPayment]", error);
+    return res.status(500).send({ success: false, message: "Server error" });
+  }
+};
+
 export const verifyVisitOtp = async (req: Request, res: Response) => {
   try {
     const { code } = req.body ?? {};
@@ -547,12 +577,16 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
     }
 
     // Only the therapist assigned to this booking can start its session.
-    const user = req.user as any;
-    const doctor = await Doctor.findOne({
-      $or: [{ userId: String(user?._id ?? "") }, { email: user?.userEmail }],
-    }).lean();
-    if (!doctor || !appt.doctorId || doctor.doctorId !== appt.doctorId) {
+    if (!(await isAssignedTherapist(req.user as any, appt))) {
       return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
+    }
+
+    // Collect at least today's session before it starts (before any attempt is
+    // used up, so an unpaid visit doesn't burn the code's tries).
+    const money = await moneyRowFor(appt);
+    const short = paidNeededBeforeVisit(appt, money) - (Number(money.paymentAmount) || 0);
+    if (short > 0) {
+      return res.status(402).send({ success: false, message: `Collect ₹${short} before starting this session.`, short });
     }
 
     // Use up one of the code's attempts atomically before checking it, so
@@ -796,6 +830,17 @@ export const updateAppointment = async (req: Request, res: Response) => {
         // Locked in by the server at completion (below / completeSession) only;
         // otherwise a therapist could raise their own cut on a booking.
         delete (updateData as any).therapistSplitPercent;
+        // Money only moves through POST /:id/payments (lib/payments.ts), so a
+        // stale draft can't overwrite or undo a recorded payment.
+        delete (updateData as any).paymentReceived;
+        delete (updateData as any).paymentAmount;
+        delete (updateData as any).paymentReceivedAt;
+        delete (updateData as any).paymentMethod;
+        delete (updateData as any).payments;
+        // No manual discounts: the price comes from the catalogue only.
+        delete (updateData as any).discountAmount;
+        delete (updateData as any).discountType;
+        delete (updateData as any).promoCode;
 
         const current = await AppointmentBooking.findById(id).exec();
         if (!current) {
@@ -894,21 +939,10 @@ export const updateAppointment = async (req: Request, res: Response) => {
             });
         }
 
-        // ── Pay-before-therapist gate (a money rule, not a permission). A
-        // therapist may not be assigned to an unpaid booking. The drawer disables
-        // the control, but that is only a courtesy - enforce it server-side so a
-        // direct API call or a UI slip can't skip payment. Applies to everyone;
-        // an exception just means recording the payment first. (report §3.1) ──
+        // A therapist can be assigned before any payment; money is collected
+        // per session instead (see verifyVisitOtp and lib/payments.ts).
         const assigningTherapist =
             changingTherapist && (updateData.doctorId ?? "") !== "";
-        const willBePaid =
-            updateData.paymentReceived ?? cur.paymentReceived ?? false;
-        if (assigningTherapist && !willBePaid) {
-            return res.status(400).send({
-                success: false,
-                message: "Record the payment before assigning a therapist.",
-            });
-        }
 
         // ── Therapist availability gate: block assignments on off-days ──
         if (assigningTherapist) {

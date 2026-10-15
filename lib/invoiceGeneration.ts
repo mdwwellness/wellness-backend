@@ -133,7 +133,7 @@ export function shouldAutoGenerateInvoice(appointment: any): boolean {
   // pay-first funnel collects payment BEFORE the visit, so waiting for
   // "completed" (or a package/consultation signal) would leave a paid home
   // visit with no invoice on the ledger. (report §3.2)
-  if (appointment.paymentReceived) return true;
+  if (appointment.paymentReceived || Number(appointment.paymentAmount) > 0) return true;
 
   if (appointment.status === "completed") return true;
 
@@ -414,9 +414,7 @@ async function createInvoiceFromAppointment(args: {
 
   const total = items_subtotal;
 
-  const packageAdvance = appointment.paymentReceived
-    ? safeNumber(appointment.paymentAmount)
-    : 0;
+  const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
   const addonPaid = mergeAddonItems(appointment)
     .filter((a) => a.paymentCollected)
     .reduce((s, a) => s + a.price, 0);
@@ -549,9 +547,7 @@ export async function syncInvoiceFromAppointment(args: {
     0,
   );
   const total = items_subtotal;
-  const packageAdvance = appointment.paymentReceived
-    ? safeNumber(appointment.paymentAmount)
-    : 0;
+  const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
   const addonPaid = mergeAddonItems(appointment, existing.locked_addon_items)
     .filter((a) => a.paymentCollected)
     .reduce((s, a) => s + a.price, 0);

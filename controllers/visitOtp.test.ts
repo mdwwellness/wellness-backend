@@ -60,6 +60,15 @@ describe("verifyVisitOtp", () => {
     expect(appt.visitOtpVerifiedAt).toBeInstanceOf(Date);
   });
 
+  it("won't start a visit until today's session is paid for", async () => {
+    appt.quotedPrice = 1600;
+    appt.paymentAmount = 600;
+    const r = res();
+    await verifyVisitOtp(req("1234"), r);
+    expect(r.status).toHaveBeenCalledWith(402);
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled(); // no attempt used up
+  });
+
   it("refuses a therapist the visit isn't assigned to", async () => {
     mockDoctorFindOne.mockReturnValue({ lean: () => Promise.resolve({ doctorId: "THR-2" }) });
     const r = res();

@@ -27,8 +27,8 @@ describe("applyLockedFields", () => {
     expect(u).toEqual({ email: "a@b.com" });
   });
 
-  it("ignores a typed fee and payment amount on an intake", async () => {
-    const u: any = { quotedPrice: 1, paymentAmount: 60034 };
+  it("ignores a typed fee on an intake", async () => {
+    const u: any = { quotedPrice: 1 };
     await applyLockedFields(u, intake);
     expect(u).toEqual({});
   });
@@ -39,17 +39,10 @@ describe("applyLockedFields", () => {
     expect(u.quotedPrice).toBe(1600);
   });
 
-  it("records the price as the amount paid", async () => {
-    const u: any = { paymentReceived: true, paymentAmount: 60034 };
-    await applyLockedFields(u, intake);
-    expect(u.paymentAmount).toBe(600);
-  });
-
-  it("refuses payment on an unpriced intake", async () => {
-    mockFindOne.mockReturnValue({ lean: () => Promise.resolve(null) });
-    await expect(
-      applyLockedFields({ paymentReceived: true }, { ...intake, quotedPrice: undefined }),
-    ).rejects.toMatchObject({ status: 400 });
+  it("keeps the price once any money is in, even if the type changes", async () => {
+    const u: any = { typeOfappointment: "appointment" };
+    await applyLockedFields(u, { ...intake, paymentAmount: 200 });
+    expect(u.quotedPrice).toBeUndefined();
   });
 
   it("leaves course prices alone", async () => {

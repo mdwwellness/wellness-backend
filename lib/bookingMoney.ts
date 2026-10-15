@@ -42,6 +42,7 @@ export function payableLedger(appointment: {
   packageOriginId?: string | null;
   quotedPrice?: number | null;
   paymentReceived?: boolean | null;
+  paymentAmount?: number | null;
   recommendedServices?: Parameters<typeof bookingLedger>[0]["recommendedServices"] | null;
   bookingKind?: string | null;
   totalSessions?: number | null;
@@ -51,6 +52,7 @@ export function payableLedger(appointment: {
   return bookingLedger({
     quotedPrice: appointment.packageOriginId ? 0 : appointment.quotedPrice ?? undefined,
     paymentReceived: appointment.paymentReceived ?? undefined,
+    paymentAmount: appointment.paymentAmount ?? undefined,
     recommendedServices: appointment.recommendedServices ?? undefined,
     bookingKind: appointment.bookingKind ?? undefined,
     totalSessions: appointment.totalSessions ?? undefined,
@@ -62,6 +64,7 @@ export function payableLedger(appointment: {
 export function bookingLedger(appointment: {
   quotedPrice?: number;
   paymentReceived?: boolean;
+  paymentAmount?: number;
   recommendedServices?: Array<{
     serviceId: string;
     serviceName: string;
@@ -78,12 +81,20 @@ export function bookingLedger(appointment: {
 
   const fee = appointment.quotedPrice ?? 0;
   if (fee > 0) {
-    lines.push({
-      key: "booking",
-      label: bookingLabel(appointment),
-      amount: fee,
-      state: appointment.paymentReceived ? "paid" : "due",
-    });
+    // Part-paid: the paid share and the balance as two lines.
+    const paid = appointment.paymentReceived
+      ? fee
+      : Math.min(fee, Math.max(0, appointment.paymentAmount ?? 0));
+    const label = bookingLabel(appointment);
+    if (paid > 0) lines.push({ key: "booking-paid", label, amount: paid, state: "paid" });
+    if (paid < fee) {
+      lines.push({
+        key: "booking",
+        label: paid > 0 ? `${label} - balance` : label,
+        amount: fee - paid,
+        state: "due",
+      });
+    }
   }
 
   for (const r of appointment.recommendedServices ?? []) {

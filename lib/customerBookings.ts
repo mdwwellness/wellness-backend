@@ -27,7 +27,7 @@ export type CustomerBooking = {
 const BOOKING_FIELDS =
   "enquiryId name service typeOfappointment bookingKind status slot physioSlot doctor " +
   "sessionsCompleted totalSessions preferredReachOutTime quotedPrice " +
-  "paymentReceived recommendedServices packageOriginId payToken createdAt";
+  "paymentReceived paymentAmount recommendedServices packageOriginId payToken createdAt";
 
 // slot.date is a Date at UTC midnight and physioSlot.date a "YYYY-MM-DD"
 // string, which also parses as UTC midnight, so the UTC day is the booked day.
