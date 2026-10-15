@@ -38,3 +38,32 @@ describe("payable ledger - one line per item", () => {
     expect({ due, paid }).toEqual({ due: 200, paid: 400 });
   });
 });
+
+describe("a course with a visit per session (ENQ-0112)", () => {
+  const origin = () =>
+    new AppointmentBooking({
+      name: "Course", phonenumber: 9000000000, bookingKind: "course",
+      totalSessions: 3, sessionIntervalDays: 7, quotedPrice: 4800, paymentAmount: 1600,
+      // what the old completion left behind: a counter that moved on
+      sessionsCompleted: 1, sessionNumber: 2,
+    });
+
+  it("the booking itself is always session 1 - its counter can't move it on", async () => {
+    const { courseSessionOf } = await import("./payments.ts");
+    expect(courseSessionOf(origin())).toEqual({ session: 1, total: 3 });
+    expect(shortBeforeStart(origin(), origin())).toBe(0); // session 1 is paid (1600 of 4800)
+  });
+
+  it("a follow-up is its own session number", async () => {
+    const { courseSessionOf } = await import("./payments.ts");
+    const o = origin();
+    const s3 = new AppointmentBooking({ name: "Course", phonenumber: 9000000000, bookingKind: "course", totalSessions: 3, sessionNumber: 3, packageOriginId: String(o._id) });
+    expect(courseSessionOf(s3)).toEqual({ session: 3, total: 3 });
+    expect(shortBeforeStart(s3, o)).toBe(3200); // sessions 2 and 3 still to pay
+  });
+
+  it("a one-booking catalogue package isn't split", async () => {
+    const { courseSessionOf } = await import("./payments.ts");
+    expect(courseSessionOf(new AppointmentBooking({ name: "P", phonenumber: 9000000000, bookingKind: "course", totalSessions: 6 }))).toBeNull();
+  });
+});

@@ -59,10 +59,31 @@ export function paidNeededBeforeVisit(visitRow: any, moneyRow: any): number {
   const price = Number(moneyRow?.quotedPrice) || 0;
   const total = Number(moneyRow?.totalSessions) || 1;
   if (total <= 1) return price;
-  const session = visitRow?.packageOriginId
-    ? Number(visitRow.sessionNumber) || 1
-    : (Number(visitRow?.sessionsCompleted) || 0) + 1;
+  const session =
+    courseSessionOf(visitRow)?.session ?? (Number(visitRow?.sessionsCompleted) || 0) + 1;
   return Math.min(price, Math.round((price / total) * session));
+}
+
+/**
+ * This visit's place in a course stored one booking per session (the booking
+ * itself is session 1; follow-ups carry sessionNumber). Such a visit is exactly
+ * one session: it completes once and never moves on to the next - the later
+ * sessions are their own visits. null for single visits, one-booking catalogue
+ * packages and add-on visits. Mirrors the dashboard's lib/package-progress.ts.
+ *
+ * ponytail: a course booked with an interval but no date never got its
+ * follow-ups, yet still counts as split here; book courses with a date.
+ */
+export function courseSessionOf(row: any): { session: number; total: number } | null {
+  if (row?.addonOf?.bookingId) return null;
+  const total = Number(row?.totalSessions) || 0;
+  if (row?.packageOriginId && String(row.packageOriginId) !== String(row._id)) {
+    return { session: Number(row.sessionNumber) || 1, total };
+  }
+  if (row?.bookingKind === "course" && total > 1 && Number(row?.sessionIntervalDays) > 0) {
+    return { session: 1, total };
+  }
+  return null;
 }
 
 /** Still to collect before this visit can start (0 = it can start). */

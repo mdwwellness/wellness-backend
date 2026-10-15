@@ -25,7 +25,7 @@ import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
 import { applyLockedFields } from "../lib/lockedFields.ts";
 import { checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
-import { addonKey, dueForVisit, isAssignedTherapist, moneyRowFor, recordPayment, shortBeforeStart, unpaidBeforeComplete } from "../lib/payments.ts";
+import { addonKey, courseSessionOf, dueForVisit, isAssignedTherapist, moneyRowFor, recordPayment, shortBeforeStart, unpaidBeforeComplete } from "../lib/payments.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 
 // Back-office roles that see every appointment / enquiry record.
@@ -578,10 +578,18 @@ export const completeSession = async (req: Request, res: Response) => {
         // Total visits: a catalogue package's count, else an ad-hoc booking's
         // stable session count (totalSessions). sessionNumber is NOT used - it's
         // repurposed below as the current-session pointer.
-        // An add-on visit (addonOf) is one session of that add-on: a single visit.
-        const total = existing.addonOf?.bookingId
+        // An add-on visit, or one session of a course with a visit per session,
+        // completes exactly once - it never moves on to the next session (that
+        // has its own visit). Only a one-booking package counts sessions here.
+        const ownSession = courseSessionOf(existing);
+        const total = existing.addonOf?.bookingId || ownSession
             ? 1
             : service?.packageCount ?? existing.totalSessions ?? 1;
+        const sessionLabel = ownSession
+            ? `Session ${ownSession.session} of ${ownSession.total}`
+            : existing.addonOf?.bookingId
+                ? `${existing.service ?? "Add-on"} session ${existing.addonOf.session}`
+                : null;
 
         // Lock the therapist's split in at the first completed session, so a
         // later change to their % never rewrites this booking's earnings.
@@ -628,9 +636,11 @@ export const completeSession = async (req: Request, res: Response) => {
             userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
             name: actorName,
             action:
-                (done
-                    ? `Package complete - all ${total} sessions done`
-                    : `Session ${sessionsDone} of ${total} completed - schedule next visit`) +
+                (sessionLabel
+                    ? `${sessionLabel} completed`
+                    : done
+                        ? `Package complete - all ${total} sessions done`
+                        : `Session ${sessionsDone} of ${total} completed - schedule next visit`) +
                 ((req.user as any)?.role !== "THERAPIST" ? " (completed by an admin on the therapist's behalf)" : "") +
                 // Keep this visit's code times once the fields reset for the next visit.
                 (existing.visitOtpSentAt
@@ -679,7 +689,7 @@ export const completeSession = async (req: Request, res: Response) => {
                 $push: {
                     activityLog: logEntry,
                     sessionNotes: {
-                        session: sessionsDone,
+                        session: ownSession?.session ?? existing.addonOf?.session ?? sessionsDone,
                         at: new Date().toISOString(),
                         note: (typeof req.body?.note === "string" ? req.body.note : "") || existing.note || "",
                         therapist: existing.doctor ?? "",
@@ -731,7 +741,9 @@ export const completeSession = async (req: Request, res: Response) => {
 
         return res.status(200).send({
             success: true,
-            message: done ? "Package complete" : `Session ${sessionsDone} of ${total} completed`,
+            message: sessionLabel
+                ? `${sessionLabel} completed`
+                : done ? "Package complete" : `Session ${sessionsDone} of ${total} completed`,
             data: finalUpdate,
         });
     } catch (error: any) {
