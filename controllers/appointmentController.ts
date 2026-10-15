@@ -1134,7 +1134,8 @@ export const getPublicPaymentSummary = async (req: Request, res: Response) => {
         const { lines, due } = payableLedger(booking);
         const items = lines
             .filter((l) => l.state === "due")
-            .map((l) => ({ label: l.label, amount: l.amount }));
+            // What's still owed on each line, not its full price.
+            .map((l) => ({ label: l.label, amount: l.due }));
 
         return res.status(200).send({
             success: true,

@@ -6,9 +6,18 @@
 export type LedgerLine = {
   key: string;
   label: string;
+  /** The item's price. */
   amount: number;
+  /** Still owed on it (0 when paid; the full price while pending). */
+  due: number;
   state: "paid" | "due" | "pending";
 };
+
+/** One line per item, part-payments included (mirrors the dashboard). */
+function paidLine(key: string, label: string, price: number, paid: number): LedgerLine {
+  const due = Math.max(0, price - paid);
+  return { key, label, amount: price, due, state: due === 0 ? "paid" : "due" };
+}
 
 function bookingLabel(appointment: {
   bookingKind?: string;
@@ -86,39 +95,27 @@ export function bookingLedger(appointment: {
 
   const fee = appointment.quotedPrice ?? 0;
   if (fee > 0) {
-    // Part-paid: the paid share and the balance as two lines.
     const paid = appointment.paymentReceived
       ? fee
       : Math.min(fee, Math.max(0, appointment.paymentAmount ?? 0));
-    const label = bookingLabel(appointment);
-    if (paid > 0) lines.push({ key: "booking-paid", label, amount: paid, state: "paid" });
-    if (paid < fee) {
-      lines.push({
-        key: "booking",
-        label: paid > 0 ? `${label} - balance` : label,
-        amount: fee - paid,
-        state: "due",
-      });
-    }
+    lines.push(paidLine("booking", bookingLabel(appointment), fee, paid));
   }
 
   for (const r of appointment.recommendedServices ?? []) {
     const key = `${r.serviceId}-${r.recommendedAt}`;
     const price = r.quotedPrice ?? 0;
-    if (r.status !== "confirmed") {
-      lines.push({ key, label: r.serviceName, amount: price, state: "pending" });
-      continue;
-    }
-    // Part-paid add-on: paid share and balance, like the booking line.
-    const paid = Math.min(price, addonPaid(r));
-    if (paid > 0) lines.push({ key: `${key}-paid`, label: r.serviceName, amount: paid, state: "paid" });
-    if (paid < price) {
-      lines.push({ key, label: paid > 0 ? `${r.serviceName} - balance` : r.serviceName, amount: price - paid, state: "due" });
-    }
+    lines.push(
+      r.status !== "confirmed"
+        ? { key, label: r.serviceName, amount: price, due: price, state: "pending" }
+        : paidLine(key, r.serviceName, price, Math.min(price, addonPaid(r))),
+    );
   }
 
-  const sum = (s: LedgerLine["state"]) =>
-    lines.filter((l) => l.state === s).reduce((t, l) => t + l.amount, 0);
-
-  return { lines, due: sum("due"), paid: sum("paid") };
+  // Pending add-ons aren't owed yet - the customer hasn't agreed to them.
+  const owed = lines.filter((l) => l.state !== "pending");
+  return {
+    lines,
+    due: owed.reduce((t, l) => t + l.due, 0),
+    paid: owed.reduce((t, l) => t + l.amount - l.due, 0),
+  };
 }
