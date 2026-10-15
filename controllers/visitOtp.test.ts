@@ -51,6 +51,15 @@ describe("verifyVisitOtp", () => {
     expect(appt.visitOtpVerified).toBe(true);
   });
 
+  it("a code has no time limit - one sent days ago still works, and the time is recorded", async () => {
+    appt.visitOtpExpiresAt = new Date(Date.now() - 3 * 86_400_000);
+    appt.visitOtpSentAt = new Date(Date.now() - 3 * 86_400_000);
+    const r = res();
+    await verifyVisitOtp(req("1234"), r);
+    expect(r.status).toHaveBeenCalledWith(200);
+    expect(appt.visitOtpVerifiedAt).toBeInstanceOf(Date);
+  });
+
   it("refuses a therapist the visit isn't assigned to", async () => {
     mockDoctorFindOne.mockReturnValue({ lean: () => Promise.resolve({ doctorId: "THR-2" }) });
     const r = res();

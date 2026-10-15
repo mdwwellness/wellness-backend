@@ -503,6 +503,10 @@ export const setAddonPaymentStatus = async (req: Request, res: Response) => {
 
 const VISIT_OTP_MAX_ATTEMPTS = 5;
 
+/** "2026-10-15 11:05" in India time, for activity-log text. */
+const stamp = (d: Date) =>
+  new Date(d).toLocaleString("sv-SE", { timeZone: "Asia/Kolkata" }).slice(0, 16);
+
 export const sendVisitOtp = async (req: Request, res: Response) => {
   try {
     const appt = await AppointmentBooking.findById(req.params.id).exec();
@@ -511,10 +515,16 @@ export const sendVisitOtp = async (req: Request, res: Response) => {
     }
     // Crypto-random 4-digit code (not Math.random).
     const code = String(crypto.randomInt(1000, 10000));
+    // No expiry: the code works until it's used (or a new one replaces it).
     appt.visitOtpHash = await bcrypt.hash(code, 10);
-    appt.visitOtpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
     appt.visitOtpVerified = false;
     appt.visitOtpAttempts = 0;
+    appt.visitOtpSentAt = new Date();
+    const user = req.user as any;
+    appt.visitOtpSentBy = user?.userfName
+      ? `${user.userfName ?? ""} ${user.userlName ?? ""}`.trim()
+      : (user?.userEmail ?? "");
+    appt.visitOtpVerifiedAt = undefined;
     await appt.save();
     // Code returned so the exec can send it via wa.me (manual interim channel).
     // Only office roles reach this (see the route), never the therapist.
@@ -532,12 +542,8 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
     if (!appt) {
       return res.status(404).send({ success: false, message: "Appointment not found" });
     }
-    if (
-      !appt.visitOtpHash ||
-      !appt.visitOtpExpiresAt ||
-      appt.visitOtpExpiresAt < new Date()
-    ) {
-      return res.status(400).send({ success: false, message: "No active code - send a new one." });
+    if (!appt.visitOtpHash) {
+      return res.status(400).send({ success: false, message: "No code yet - ask the office to send one." });
     }
 
     // Only the therapist assigned to this booking can start its session.
@@ -564,6 +570,7 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
       return res.status(400).send({ success: false, message: "Incorrect code." });
     }
     appt.visitOtpVerified = true;
+    appt.visitOtpVerifiedAt = new Date();
     await appt.save();
     return res.status(200).send({ success: true, message: "Visit verified." });
   } catch (error: any) {
@@ -626,7 +633,7 @@ export const completeSession = async (req: Request, res: Response) => {
             {
                 $inc: { sessionsCompleted: 1 },
                 // Consume the verification so the next visit needs a fresh OTP.
-                $set: { visitOtpVerified: false, visitOtpHash: null, visitOtpExpiresAt: null, ...splitLock },
+                $set: { visitOtpVerified: false, visitOtpHash: null, visitOtpExpiresAt: null, visitOtpSentAt: null, visitOtpSentBy: null, visitOtpVerifiedAt: null, ...splitLock },
             },
             { new: true },
         ).exec();
@@ -654,7 +661,12 @@ export const completeSession = async (req: Request, res: Response) => {
                 (done
                     ? `Package complete - all ${total} sessions done`
                     : `Session ${sessionsDone} of ${total} completed - schedule next visit`) +
-                ((req.user as any)?.role !== "THERAPIST" ? " (completed by an admin on the therapist's behalf)" : ""),
+                ((req.user as any)?.role !== "THERAPIST" ? " (completed by an admin on the therapist's behalf)" : "") +
+                // Keep this visit's code times once the fields reset for the next visit.
+                (existing.visitOtpSentAt
+                    ? ` - code sent ${stamp(existing.visitOtpSentAt)}${existing.visitOtpSentBy ? ` by ${existing.visitOtpSentBy}` : ""}`
+                    : "") +
+                (existing.visitOtpVerifiedAt ? `, verified ${stamp(existing.visitOtpVerifiedAt)}` : ""),
         };
 
         const actor = {
@@ -774,6 +786,9 @@ export const updateAppointment = async (req: Request, res: Response) => {
         delete (updateData as any).visitOtpExpiresAt;
         delete (updateData as any).visitOtpVerified;
         delete (updateData as any).visitOtpAttempts;
+        delete (updateData as any).visitOtpSentAt;
+        delete (updateData as any).visitOtpSentBy;
+        delete (updateData as any).visitOtpVerifiedAt;
         delete (updateData as any).addonOtpHash;
         delete (updateData as any).addonOtpExpiresAt;
         delete (updateData as any).addonOtpTarget;
