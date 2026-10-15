@@ -586,7 +586,9 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
     const money = await moneyRowFor(appt);
     const short = paidNeededBeforeVisit(appt, money) - (Number(money.paymentAmount) || 0);
     if (short > 0) {
-      return res.status(402).send({ success: false, message: `Collect ₹${short} before starting this session.`, short });
+      // due = everything still owed, so the customer can pay ahead if they want.
+      const due = Math.max(0, (Number(money.quotedPrice) || 0) - (Number(money.paymentAmount) || 0));
+      return res.status(402).send({ success: false, message: `Collect ₹${short} before starting this session.`, short, due });
     }
 
     // Use up one of the code's attempts atomically before checking it, so

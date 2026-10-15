@@ -66,6 +66,7 @@ describe("verifyVisitOtp", () => {
     const r = res();
     await verifyVisitOtp(req("1234"), r);
     expect(r.status).toHaveBeenCalledWith(402);
+    expect((r.send as any).mock.calls[0][0]).toMatchObject({ short: 1000, due: 1000 });
     expect(mockFindOneAndUpdate).not.toHaveBeenCalled(); // no attempt used up
   });
 
