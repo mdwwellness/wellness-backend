@@ -67,7 +67,9 @@ export function paidNeededBeforeVisit(visitRow: any, moneyRow: any): number {
 
 /** Still to collect before this visit can start (0 = it can start). */
 export function shortBeforeStart(visitRow: any, moneyRow: any): number {
-  if (visitRow?.addonOf) {
+  // ?.bookingId, not the object: a stored record has an empty addonOf even
+  // when it isn't an add-on visit, and an empty object is truthy.
+  if (visitRow?.addonOf?.bookingId) {
     const addon = findAddon(moneyRow, visitRow.addonOf.key);
     if (!addon) return 0;
     const needed = Math.min(
@@ -81,7 +83,9 @@ export function shortBeforeStart(visitRow: any, moneyRow: any): number {
 
 /** Everything still owed for this visit's own money (the most that can be paid now). */
 export function dueForVisit(visitRow: any, moneyRow: any): number {
-  if (visitRow?.addonOf) {
+  // ?.bookingId, not the object: a stored record has an empty addonOf even
+  // when it isn't an add-on visit, and an empty object is truthy.
+  if (visitRow?.addonOf?.bookingId) {
     const addon = findAddon(moneyRow, visitRow.addonOf.key);
     return addon ? Math.max(0, (Number(addon.quotedPrice) || 0) - addonPaid(addon)) : 0;
   }
@@ -128,7 +132,7 @@ export async function recordPayment(args: {
   addon?: unknown;
 }): Promise<RecordPaymentResult> {
   const doc = args.addon ? args.row : await moneyRowFor(args.row);
-  const key = args.addon ? String(args.addon) : args.row?.addonOf?.key;
+  const key = args.addon ? String(args.addon) : (args.row?.addonOf?.bookingId ? args.row.addonOf.key : undefined);
   const addon = key ? findAddon(doc, key) : undefined;
   if (key && !addon) return { ok: false, code: 404, message: "Add-on not found on this booking." };
   if (addon && addon.status !== "confirmed") {
