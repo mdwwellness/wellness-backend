@@ -6,7 +6,6 @@ import Invoice from "../models/invoiceModel.ts";
 import Service from "../models/serviceModel.ts";
 import { nextSequence, nextYearlySequence } from "./counters.ts";
 import { logger } from "./logger.ts";
-import { ensureInvoicePdfGeneratedAndUploaded } from "./invoicePdf.ts";
 import { OFFERINGS } from "./offerings.ts";
 
 type Actor = {
@@ -592,33 +591,22 @@ export async function syncInvoiceFromAppointment(args: {
   existing.last_edited_by = editor;
   existing.last_edited_at = new Date();
 
-  // Only re-issue the PDF when something it actually shows has changed. For an
-  // open invoice that's anything (it re-derives freely); for a paid one it's
-  // just the synced facts (therapist/session) - so a no-op appointment save no
-  // longer churns pdf_url or hammers UploadThing on a settled invoice.
+  // When something the PDF shows has changed, mark the PDF out of date instead
+  // of re-rendering and uploading it here: that ran on every booking save and
+  // added seconds to it. It's rebuilt on demand (Generate PDF ->
+  // generateInvoicePdf), the same as after a manual invoice edit.
   const pdfVisibleChanged =
-    !wasPaid ||
     existing.isModified("line_items") ||
     existing.isModified("total") ||
+    existing.isModified("advance_paid") ||
+    existing.isModified("balance_due") ||
+    existing.isModified("payment_status") ||
     existing.isModified("therapist_name") ||
     (existing as any).isModified("therapist_id") ||
     existing.isModified("session_number");
+  if (pdfVisibleChanged) existing.pdf_url = null;
 
   await existing.save();
-
-  if (pdfVisibleChanged) {
-    try {
-      const pdf_url = await ensureInvoicePdfGeneratedAndUploaded(existing);
-      existing.pdf_url = pdf_url;
-      await existing.save();
-    } catch (err) {
-      logger.error(
-        `[invoice-pdf] regeneration failed for invoice ${existing.invoice_id}`,
-        err,
-      );
-    }
-  }
-
   return existing;
 }
 
