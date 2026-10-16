@@ -30,7 +30,8 @@ appointmentRouter.post("/public", addPublicEnquiry);
 // Guarded by an unguessable token, field-limited, and rate-limited.
 appointmentRouter.get("/pay/:token", getPublicPaymentSummary);
 
-appointmentRouter.post("/", userAuth, addAppointmentsDetails);
+// New bookings are the office's job; therapists only work on visits assigned to them.
+appointmentRouter.post("/", userAuth, requireRole("SUPER_ADMIN", "ADMIN", "STAFF", "CUSTOMER_CARE"), addAppointmentsDetails);
 appointmentRouter.get("/", userAuth, getAllAppointments);
 appointmentRouter.get("/therapist-session-counts", userAuth, getTherapistSessionCounts);
 appointmentRouter.post("/:id/pay-link", userAuth, createPaymentLink);
