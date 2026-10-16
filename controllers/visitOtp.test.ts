@@ -127,7 +127,7 @@ describe("completeSession: the work is recorded first", () => {
       const r = res();
       await completeSession(done(body), r);
       expect(r.status).toHaveBeenCalledWith(400);
-      expect(r.send.mock.calls[0][0].message).toBe("Tick Service performed and write the session note first.");
+      expect((r.send as any).mock.calls[0][0].message).toBe("Tick Service performed and write the session note first.");
     }
   });
 
@@ -136,6 +136,6 @@ describe("completeSession: the work is recorded first", () => {
     const r = res();
     await completeSession(done({ note: "Lower back, dry needling" }), r);
     // Past the work check: whatever it hits next, it isn't this refusal.
-    expect(r.send.mock.calls[0]?.[0]?.message).not.toBe("Tick Service performed and write the session note first.");
+    expect((r.send as any).mock.calls[0]?.[0]?.message).not.toBe("Tick Service performed and write the session note first.");
   });
 });
