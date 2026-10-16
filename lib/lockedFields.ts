@@ -29,8 +29,9 @@ export async function cataloguePrice(type: string | undefined): Promise<number |
  * Mutates `update` (the PUT body) in place; `cur` is the stored booking and
  * `role` the signed-in user's.
  *
- * ponytail: intakes only. Course prices still come from the client (rate-table
- * tiers live in the frontend); move that pricing here to lock courses too.
+ * A course's price is locked once booked. ponytail: it's still worked out by
+ * the booking form when the course is created (rate-table tiers live in the
+ * frontend); move that pricing here to check it at creation too.
  */
 export async function applyLockedFields(update: any, cur: any, role?: string): Promise<void> {
   for (const f of CUSTOMER_FIELDS) {
@@ -41,7 +42,15 @@ export async function applyLockedFields(update: any, cur: any, role?: string): P
   // already-cancelled booking is no change, so it passes.
   if (role === "THERAPIST" && update.status === "cancelled" && cur.status !== "cancelled") delete update.status;
 
-  if (!isIntake(cur)) return;
+  if (!isIntake(cur)) {
+    // A course's price and length are set when it's booked (from the session
+    // rate table); a client update never changes them. Changing a course
+    // properly means adding or removing its visits, which a field edit can't do.
+    delete update.quotedPrice;
+    delete update.originalPrice;
+    delete update.totalSessions;
+    return;
+  }
 
   // The price is never taken from the client. Once any money is in, the booking
   // keeps the price it was paid against; before that it's (re)priced when its

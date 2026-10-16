@@ -47,6 +47,12 @@ describe("applyLockedFields", () => {
     expect(office).toEqual({ status: "cancelled" });
   });
 
+  it("a course keeps the price and length it was booked with", async () => {
+    const u: any = { quotedPrice: 1, originalPrice: 2, totalSessions: 99, note: "kept" };
+    await applyLockedFields(u, { ...intake, bookingKind: "course", quotedPrice: 6400, totalSessions: 4 }, "ADMIN");
+    expect(u).toEqual({ note: "kept" });
+  });
+
   it("ignores a typed fee on an intake", async () => {
     const u: any = { quotedPrice: 1 };
     await applyLockedFields(u, intake);
@@ -65,9 +71,4 @@ describe("applyLockedFields", () => {
     expect(u.quotedPrice).toBeUndefined();
   });
 
-  it("leaves course prices alone", async () => {
-    const u: any = { quotedPrice: 9000 };
-    await applyLockedFields(u, { ...intake, bookingKind: "course", totalSessions: 6 });
-    expect(u.quotedPrice).toBe(9000);
-  });
 });
