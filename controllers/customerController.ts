@@ -124,6 +124,12 @@ export async function updateCustomer(req: Request, res: Response) {
   try {
     const { customerId } = req.params;
     const patch = req.body ?? {};
+    // Therapists only add notes; the customer's details are the office's (client rule).
+    if (req.user?.role === "THERAPIST") {
+      delete patch.name;
+      delete patch.email;
+      delete patch.address;
+    }
 
     const customer = await Customer.findOne({ customer_id: customerId }).exec();
     if (!customer) {

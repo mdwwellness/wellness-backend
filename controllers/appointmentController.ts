@@ -809,7 +809,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
 
         // Customer details and the intake price can't be edited by hand.
         try {
-            await applyLockedFields(updateData, cur);
+            await applyLockedFields(updateData, cur, req.user?.role);
         } catch (e: any) {
             if (e?.status !== 400) throw e;
             return res.status(400).send({ success: false, message: e.message });

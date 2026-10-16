@@ -27,6 +27,12 @@ describe("applyLockedFields", () => {
     expect(u).toEqual({ email: "a@b.com" });
   });
 
+  it("a therapist changes none of the customer's details, not even a blank", async () => {
+    const u: any = { name: "X", phonenumber: 9000000000, email: "a@b.com", location: "Y", age: 40, gender: "male", note: "kept" };
+    await applyLockedFields(u, intake, "THERAPIST");
+    expect(u).toEqual({ note: "kept" });
+  });
+
   it("ignores a typed fee on an intake", async () => {
     const u: any = { quotedPrice: 1 };
     await applyLockedFields(u, intake);

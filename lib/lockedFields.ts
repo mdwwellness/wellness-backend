@@ -4,6 +4,8 @@ import { BOOKING_TYPE_SERVICE } from "./invoiceGeneration.ts";
 // Who the booking is for. Set when the booking is created; after that a
 // client update may only fill a blank, never change a stored value.
 const CUSTOMER_FIELDS = ["name", "phonenumber", "email"] as const;
+// A therapist changes none of the customer's details, not even a blank (client rule).
+const THERAPIST_LOCKED = [...CUSTOMER_FIELDS, "location", "age", "gender"] as const;
 
 const blank = (v: unknown) => v === undefined || v === null || v === "";
 
@@ -24,15 +26,17 @@ export async function cataloguePrice(type: string | undefined): Promise<number |
 /**
  * Strips what a dashboard user must not be able to change on an existing
  * booking, and sets the intake price from the catalogue instead of the client.
- * Mutates `update` (the PUT body) in place; `cur` is the stored booking.
+ * Mutates `update` (the PUT body) in place; `cur` is the stored booking and
+ * `role` the signed-in user's.
  *
  * ponytail: intakes only. Course prices still come from the client (rate-table
  * tiers live in the frontend); move that pricing here to lock courses too.
  */
-export async function applyLockedFields(update: any, cur: any): Promise<void> {
+export async function applyLockedFields(update: any, cur: any, role?: string): Promise<void> {
   for (const f of CUSTOMER_FIELDS) {
     if (!blank(cur[f])) delete update[f];
   }
+  if (role === "THERAPIST") for (const f of THERAPIST_LOCKED) delete update[f];
 
   if (!isIntake(cur)) return;
 
