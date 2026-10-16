@@ -37,6 +37,9 @@ export async function applyLockedFields(update: any, cur: any, role?: string): P
     if (!blank(cur[f])) delete update[f];
   }
   if (role === "THERAPIST") for (const f of THERAPIST_LOCKED) delete update[f];
+  // Only the office cancels a booking (client rule). An echoed "cancelled" on an
+  // already-cancelled booking is no change, so it passes.
+  if (role === "THERAPIST" && update.status === "cancelled" && cur.status !== "cancelled") delete update.status;
 
   if (!isIntake(cur)) return;
 

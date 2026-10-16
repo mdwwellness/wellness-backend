@@ -33,6 +33,20 @@ describe("applyLockedFields", () => {
     expect(u).toEqual({ note: "kept" });
   });
 
+  it("a therapist can't cancel a booking, but can still start it", async () => {
+    const cancel: any = { status: "cancelled" };
+    await applyLockedFields(cancel, { ...intake, status: "scheduled" }, "THERAPIST");
+    expect(cancel).toEqual({});
+
+    const start: any = { status: "ongoing" };
+    await applyLockedFields(start, { ...intake, status: "scheduled" }, "THERAPIST");
+    expect(start).toEqual({ status: "ongoing" });
+
+    const office: any = { status: "cancelled" };
+    await applyLockedFields(office, { ...intake, status: "scheduled" }, "ADMIN");
+    expect(office).toEqual({ status: "cancelled" });
+  });
+
   it("ignores a typed fee on an intake", async () => {
     const u: any = { quotedPrice: 1 };
     await applyLockedFields(u, intake);
