@@ -93,10 +93,33 @@ export async function findTherapistClash(args: {
   return null;
 }
 
+/** How a course's sessions repeat: so many a week (1-4), or every N days (older courses). */
+export type CourseSchedule = { perWeek: number; intervalDays: number };
+
+/** A course's schedule from a booking, or null when it has no repeat. */
+export function courseScheduleOf(b: any): CourseSchedule | null {
+  const perWeek = Number(b?.sessionsPerWeek);
+  const intervalDays = Number(b?.sessionIntervalDays) || 0;
+  const s = { perWeek: Number.isInteger(perWeek) && perWeek >= 1 && perWeek <= 4 ? perWeek : 0, intervalDays };
+  return s.perWeek || s.intervalDays > 0 ? s : null;
+}
+
+/**
+ * Days from session 1 to session `n` (1-based). So many a week spreads them
+ * evenly through each week: twice a week from a Tuesday is Tue, Fri, Tue, Fri;
+ * three times from a Monday is Mon, Wed, Fri. Mirrors the dashboard's
+ * src/lib/course-schedule.ts - KEEP IN SYNC.
+ */
+export function courseDayOffset(n: number, s: CourseSchedule): number {
+  const k = n - 1;
+  if (s.perWeek) return Math.floor(k / s.perWeek) * 7 + Math.floor(((k % s.perWeek) * 7) / s.perWeek);
+  return k * s.intervalDays;
+}
+
 /** "yyyy-MM-dd" of session `n` (1-based) of a course starting on `first`. */
-function courseSessionDate(first: string | Date, n: number, intervalDays: number): string {
+function courseSessionDate(first: string | Date, n: number, s: CourseSchedule): string {
   const d = new Date(first);
-  d.setDate(d.getDate() + (n - 1) * intervalDays);
+  d.setDate(d.getDate() + courseDayOffset(n, s));
   return d.toISOString().split("T")[0];
 }
 
@@ -146,10 +169,10 @@ export async function createBooking(
   // checks every session it will create (below), before anything is saved.
   if (input.doctorId && input.slot?.date && input.slot?.time) {
     const total = Number(input.totalSessions) || 0;
-    const every = Number(input.sessionIntervalDays) || 0;
-    const sessions = input.bookingKind === "course" && total > 1 && every > 0 ? total : 1;
+    const schedule = courseScheduleOf(input);
+    const sessions = input.bookingKind === "course" && total > 1 && schedule ? total : 1;
     for (let n = 1; n <= sessions; n++) {
-      const date = n === 1 ? input.slot.date : courseSessionDate(input.slot.date, n, every);
+      const date = n === 1 ? input.slot.date : courseSessionDate(input.slot.date, n, schedule!);
       const clash = await findTherapistClash({
         doctorId: input.doctorId,
         date,
@@ -170,6 +193,8 @@ export async function createBooking(
   // Services catalogue, never the client.
   // ponytail: course prices are still computed client-side from the rate table.
   input = { ...input };
+  // Only 1-4 a week is stored; anything else is dropped, not a failed save.
+  input.sessionsPerWeek = courseScheduleOf(input)?.perWeek || undefined;
   delete input.discountAmount;
   delete input.discountType;
   delete input.promoCode;
@@ -310,25 +335,25 @@ export async function createBooking(
   await maybeCreateInvoiceForAppointment({ appointment, actor: opts.actor });
 
   // ── Auto-generate follow-up sessions for multi-session courses ────────
-  // When a course with totalSessions > 1 and sessionIntervalDays is provided,
-  // create the remaining sessions as separate records linked via packageOriginId.
-  // Each follow-up inherits the same therapist, time, service, and price but gets
-  // its own date offset by the interval. Only session 1 gets invoice + customer.
+  // When a course with totalSessions > 1 has a schedule (so many a week, or an
+  // interval for older ones), create the remaining sessions as separate records
+  // linked via packageOriginId. Each follow-up inherits the same therapist, time,
+  // service, and price but gets its own date. Only session 1 gets invoice + customer.
   const totalSessions = Number(input.totalSessions) || 0;
-  const intervalDays = Number(input.sessionIntervalDays) || 0;
+  const schedule = courseScheduleOf(input);
   if (
     input.bookingKind === "course" &&
     totalSessions > 1 &&
-    intervalDays > 0 &&
+    schedule &&
     input.slot?.date &&
     appointment._id
   ) {
     try {
       const followUps: any[] = [];
       for (let i = 2; i <= totalSessions; i++) {
-        // Session 1 date + (i-1) * intervalDays. Its time was already checked
-        // free by the double-booking guard above.
-        const dateStr = courseSessionDate(input.slot.date, i, intervalDays);
+        // Its date from the schedule; its time was already checked free by the
+        // double-booking guard above.
+        const dateStr = courseSessionDate(input.slot.date, i, schedule);
 
         const followUpSeq = await nextSequence("enquiry");
         const followUpEnquiryId = `ENQ-${String(followUpSeq).padStart(4, "0")}`;
@@ -347,7 +372,8 @@ export async function createBooking(
           // Session tracking
           sessionNumber: i,
           totalSessions,
-          sessionIntervalDays: intervalDays,
+          sessionIntervalDays: schedule.intervalDays || undefined,
+          sessionsPerWeek: schedule.perWeek || undefined,
           packageOriginId: String(appointment._id),
           // Date for this session
           slot: { date: dateStr, time: input.slot.time },
@@ -384,7 +410,7 @@ export async function createBooking(
       appointment.activityLog.push({
         at: new Date().toISOString(),
         name: name,
-        action: `Created ${totalSessions}-session course (${intervalDays}-day interval). Follow-ups: ${followUps.map((f) => f.enquiryId).join(", ")}`,
+        action: `Created ${totalSessions}-session course (${schedule.perWeek ? `${schedule.perWeek}x a week` : `${schedule.intervalDays}-day interval`}). Follow-ups: ${followUps.map((f) => f.enquiryId).join(", ")}`,
       });
       await appointment.save();
     } catch (err) {

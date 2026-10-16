@@ -73,4 +73,20 @@ describe("createBooking: a course checks every session before saving", () => {
       message: "That therapist is already booked at 10:30 on 2027-01-22 (session 2).",
     });
   });
+
+  it("twice a week checks the session 3 days later", async () => {
+    m.byDate = { "2027-01-18": [{ slot: { date: "2027-01-18", time: "10:30" } }] };
+    const result = await createBooking({
+      name: "Asha",
+      phonenumber: 9876500001,
+      doctorId: "THR-1",
+      slot: { date: "2027-01-15", time: "10:30" },
+      therapyStartTime: "10:30",
+      therapyEndTime: "11:30",
+      bookingKind: "course",
+      totalSessions: 4,
+      sessionsPerWeek: 2,
+    });
+    expect(result).toMatchObject({ ok: false, code: 409, message: "That therapist is already booked at 10:30 on 2027-01-18 (session 2)." });
+  });
 });

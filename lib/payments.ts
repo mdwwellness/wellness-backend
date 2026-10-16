@@ -102,7 +102,7 @@ export function courseSessionOf(row: any): { session: number; total: number } | 
   if (row?.packageOriginId && String(row.packageOriginId) !== String(row._id)) {
     return { session: Number(row.sessionNumber) || 1, total };
   }
-  if (row?.bookingKind === "course" && total > 1 && Number(row?.sessionIntervalDays) > 0) {
+  if (row?.bookingKind === "course" && total > 1 && (Number(row?.sessionIntervalDays) > 0 || Number(row?.sessionsPerWeek) > 0)) {
     return { session: 1, total };
   }
   return null;

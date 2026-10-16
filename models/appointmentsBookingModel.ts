@@ -71,6 +71,14 @@ const AppointmentBookingSchema = new Schema({
     sessionIntervalDays: {
         type: Number,
     },
+    // How many sessions a week (1-4), spread evenly from session 1's date
+    // (lib/bookingService.ts courseDayOffset). Newer courses use this instead
+    // of sessionIntervalDays (B2 #10).
+    sessionsPerWeek: {
+        type: Number,
+        min: 1,
+        max: 4,
+    },
     sessionsCompleted: {
         type: Number,
         default: 0,

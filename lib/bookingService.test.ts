@@ -29,7 +29,7 @@ vi.mock("./invoiceGeneration.ts", () => ({
   maybeCreateInvoiceForAppointment: m.maybeInvoice,
 }));
 
-import { createBooking } from "./bookingService.ts";
+import { courseDayOffset, courseScheduleOf, createBooking } from "./bookingService.ts";
 
 const PHONE = 9876543210;
 
@@ -118,5 +118,29 @@ describe("createBooking: repeat folding", () => {
   it("never folds unless the caller opts in", async () => {
     expect(await createBooking(request())).toMatchObject({ ok: true, folded: false });
     expect(m.find).not.toHaveBeenCalled();
+  });
+});
+
+describe("course schedule: so many sessions a week", () => {
+  // Offsets in days from session 1, for the first 8 sessions.
+  const offsets = (perWeek: number) =>
+    Array.from({ length: 8 }, (_, i) => courseDayOffset(i + 1, { perWeek, intervalDays: 0 }));
+
+  it("spreads the sessions evenly through each week", () => {
+    expect(offsets(1)).toEqual([0, 7, 14, 21, 28, 35, 42, 49]);
+    expect(offsets(2)).toEqual([0, 3, 7, 10, 14, 17, 21, 24]); // Tue, Fri, Tue, Fri...
+    expect(offsets(3)).toEqual([0, 2, 4, 7, 9, 11, 14, 16]); // Mon, Wed, Fri...
+    expect(offsets(4)).toEqual([0, 1, 3, 5, 7, 8, 10, 12]);
+  });
+
+  it("older courses keep their every-N-days interval", () => {
+    expect(courseDayOffset(3, { perWeek: 0, intervalDays: 14 })).toBe(28);
+  });
+
+  it("only 1 to 4 a week counts as a schedule", () => {
+    expect(courseScheduleOf({ sessionsPerWeek: 2 })).toEqual({ perWeek: 2, intervalDays: 0 });
+    expect(courseScheduleOf({ sessionsPerWeek: 5 })).toBeNull();
+    expect(courseScheduleOf({ sessionIntervalDays: 7 })).toEqual({ perWeek: 0, intervalDays: 7 });
+    expect(courseScheduleOf({})).toBeNull();
   });
 });
