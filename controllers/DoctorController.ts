@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { canManageSplit, parseSplitPercent } from "../lib/therapistSplit.ts";
 import { withUniqueReferralCode } from "../lib/referralCode.ts";
-import { mayActOnTherapist } from "../lib/payments.ts";
+import { mayActOnTherapist, ownDoctorId } from "../lib/payments.ts";
 import { HIDDEN_FROM_THERAPISTS } from "../lib/bookingSource.ts";
 
 /**
@@ -129,11 +129,17 @@ export async function addDoctor(req: Request, res: Response) {
 
 export async function getDoctors(req: Request, res: Response) {
   try {
-    // Referral codes are Super Admin only (hidden by default in the model).
+    // Referral codes (hidden by default in the model): the Super Admin sees
+    // every code, a therapist only their own.
+    const role = req.user?.role;
     const doctorsDetails = await Doctor.find()
-      .select(req.user?.role === "SUPER_ADMIN" ? "+referralCode" : "")
+      .select(role === "SUPER_ADMIN" || role === "THERAPIST" ? "+referralCode" : "")
       .sort({ createdAt: -1 })
       .exec();
+    if (role === "THERAPIST") {
+      const own = await ownDoctorId(req.user as any);
+      for (const d of doctorsDetails) if (d.doctorId !== own) d.referralCode = undefined;
+    }
     if (!doctorsDetails) {
       return res.status(404).send({
         success: false,

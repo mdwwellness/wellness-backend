@@ -183,18 +183,32 @@ describe("referral codes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    select.mockReturnValue({ sort: () => ({ exec: () => Promise.resolve(list) }) });
+    // A fresh copy each test: the therapist case blanks colleagues' codes.
+    select.mockReturnValue({ sort: () => ({ exec: () => Promise.resolve(list.map((d) => ({ ...d }))) }) });
     mockDoctorFind.mockReturnValue({ select });
     mockBookingFind.mockReturnValue({ select: () => ({ sort: () => ({ limit: () => ({ lean: () => Promise.resolve([{ enquiryId: "ENQ-1" }]) }) }) }) });
   });
 
-  it("only the Super Admin's therapist list asks for the hidden referral codes", async () => {
-    for (const role of ["THERAPIST", "ADMIN", "STAFF"]) {
+  const sent = (res: any) => res.send.mock.calls[0][0].data.map((d: any) => [d.doctorId, d.referralCode]);
+
+  it("the office (Admin, Staff) gets no referral codes", async () => {
+    for (const role of ["ADMIN", "STAFF"]) {
       await getDoctors(as(role, "u1"), mockRes());
       expect(select).toHaveBeenLastCalledWith("");
     }
-    await getDoctors(as("SUPER_ADMIN", "x"), mockRes());
-    expect(select).toHaveBeenLastCalledWith("+referralCode");
+  });
+
+  it("the Super Admin sees every code", async () => {
+    const res = mockRes();
+    await getDoctors(as("SUPER_ADMIN", "x"), res);
+    expect(sent(res)).toEqual([["THR-1", "AAAAA"], ["THR-2", "BBBBB"]]);
+  });
+
+  it("a therapist sees only their own code", async () => {
+    mockDoctorFindOne.mockReturnValue({ lean: () => Promise.resolve({ doctorId: "THR-1" }) });
+    const res = mockRes();
+    await getDoctors(as("THERAPIST", "u1"), res);
+    expect(sent(res)).toEqual([["THR-1", "AAAAA"], ["THR-2", undefined]]);
   });
 
   it("referrals list the bookings that came in through the therapist's code", async () => {

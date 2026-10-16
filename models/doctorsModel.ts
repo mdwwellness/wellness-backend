@@ -53,8 +53,9 @@ const doctorsSchema = new mongoose.Schema({
         type: String,
     },
     // Public referral code (?ref=CODE), random and unique; see lib/referralCode.ts.
-    // Assigned on creation; never accepted from a client. Super Admin only (client
-    // rule), so it is left out of every read unless asked for with +referralCode.
+    // Assigned on creation; never accepted from a client. Only the Super Admin and
+    // the therapist themself see it (client rule), so it is left out of every read
+    // unless asked for with +referralCode.
     referralCode: {
         type: String,
         unique: true,
