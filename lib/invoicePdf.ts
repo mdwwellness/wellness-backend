@@ -348,8 +348,12 @@ function drawPaymentAndTotals(
 
   // Left: payment status + notes.
   const afterHead = drawSectionHeading(doc, "Payment Information", leftX, y, leftW);
+  // Stored status is only paid/pending; money already in reads "Part paid"
+  // (same as the dashboard's invoiceStatusLabel).
   const paymentLabel =
-    PAYMENT_LABELS[invoice.payment_status] ?? invoice.payment_status;
+    invoice.payment_status !== "paid" && Number(invoice.advance_paid) > 0
+      ? "Part paid"
+      : (PAYMENT_LABELS[invoice.payment_status] ?? invoice.payment_status);
   doc
     .fillColor(invoice.payment_status === "paid" ? COLORS.primaryDark : COLORS.text)
     .font("Helvetica-Bold")

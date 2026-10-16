@@ -7,6 +7,7 @@ import Service from "../models/serviceModel.ts";
 import { nextSequence, nextYearlySequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { OFFERINGS } from "./offerings.ts";
+import { moneyRowFor } from "./payments.ts";
 import { birthYearFrom, customerAge, toGender } from "./personDetails.ts";
 
 type Actor = {
@@ -210,12 +211,45 @@ function deriveInvoiceType(
   return "therapy_session";
 }
 
+/**
+ * The booking a row is billed on, and that booking as the invoice should see it:
+ * with the add-ons confirmed on ANY of its visits. Course sessions and add-on
+ * visits keep their money on the booking they belong to, so that booking's one
+ * invoice bills everything, and a visit never gets an invoice of its own (a
+ * completed course session used to spawn a duplicate bill for its share).
+ */
+async function billedBooking(row: any): Promise<{ booking: any; billed: any }> {
+  const booking = await moneyRowFor(row);
+  const sessions = await AppointmentBooking.find(
+    { packageOriginId: String(booking._id) },
+    { recommendedServices: 1 },
+  ).lean();
+  const plain = typeof booking.toObject === "function" ? booking.toObject() : booking;
+  return {
+    booking,
+    billed: {
+      ...plain,
+      recommendedServices: [
+        ...(plain.recommendedServices ?? []),
+        ...sessions.flatMap((v: any) => v.recommendedServices ?? []),
+      ],
+    },
+  };
+}
+
+/** A visit of a booking (course session, add-on visit), not a booking itself. */
+function isVisitOfBooking(row: any): boolean {
+  return Boolean(row?.packageOriginId || row?.addonOf?.bookingId);
+}
+
 export async function maybeCreateInvoiceForAppointment(args: {
   appointment: any;
   actor?: Actor;
 }): Promise<InvoiceDoc | null> {
   const { appointment, actor } = args;
   if (!appointment?._id) return null;
+  // Billed on its booking's invoice instead (see billedBooking).
+  if (isVisitOfBooking(appointment)) return null;
   if (!shouldAutoGenerateInvoice(appointment)) return null;
 
   const existing = await Invoice.findOne({ appointment_id: appointment._id }).exec();
@@ -415,8 +449,9 @@ async function createInvoiceFromAppointment(args: {
 
   const therapist_name = appointment.doctor ?? "";
 
+  const { billed } = await billedBooking(appointment);
   const line_items = await buildLineItemsFromAppointment(
-    appointment,
+    billed,
     service,
     invoice_type,
   );
@@ -444,7 +479,7 @@ async function createInvoiceFromAppointment(args: {
   const total = items_subtotal;
 
   const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
-  const addonPaid = mergeAddonItems(appointment)
+  const addonPaid = mergeAddonItems(billed)
     .reduce((s, a) => s + a.paid, 0);
   const consultPaid =
     hasConsultationCharge(appointment) && appointment.consultationCompleted
@@ -526,8 +561,10 @@ export async function syncInvoiceFromAppointment(args: {
   appointment: any;
   actor?: Actor;
 }): Promise<InvoiceDoc | null> {
-  const { appointment, actor } = args;
-  if (!appointment?._id) return null;
+  const { actor } = args;
+  if (!args.appointment?._id) return null;
+  // Checkout of a course session or add-on visit updates the booking's invoice.
+  const { booking: appointment, billed } = await billedBooking(args.appointment);
 
   const existing = await Invoice.findOne({
     appointment_id: appointment._id,
@@ -565,7 +602,7 @@ export async function syncInvoiceFromAppointment(args: {
   // on a Home-Therapy package).
   const invoice_type = deriveInvoiceType(appointment, service);
   const line_items = await buildLineItemsFromAppointment(
-    appointment,
+    billed,
     service,
     invoice_type,
     existing.locked_addon_items,
@@ -576,7 +613,7 @@ export async function syncInvoiceFromAppointment(args: {
   );
   const total = items_subtotal;
   const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
-  const addonPaid = mergeAddonItems(appointment, existing.locked_addon_items)
+  const addonPaid = mergeAddonItems(billed, existing.locked_addon_items)
     .reduce((s, a) => s + a.paid, 0);
   const consultPaid =
     hasConsultationCharge(appointment) && appointment.consultationCompleted
@@ -670,13 +707,16 @@ export async function lockConfirmedAddonsToInvoice(args: {
   );
   if (confirmed.length === 0) return;
 
+  // The add-ons belong on the booking's invoice, even when they were
+  // recommended during one of its later visits.
+  const booking = await moneyRowFor(appointment);
   let invoice = await Invoice.findOne({
-    appointment_id: appointment._id,
+    appointment_id: booking._id,
   }).exec();
   if (!invoice) {
-    // No invoice yet - create one from the appointment while it still carries
+    // No invoice yet - create one from the booking while it still carries
     // the add-ons, so the invoice is fully formed before we lock.
-    invoice = await maybeCreateInvoiceForAppointment({ appointment, actor });
+    invoice = await maybeCreateInvoiceForAppointment({ appointment: booking, actor });
     if (!invoice) return;
   }
 
