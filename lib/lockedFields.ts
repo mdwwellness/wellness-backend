@@ -4,8 +4,12 @@ import { BOOKING_TYPE_SERVICE } from "./invoiceGeneration.ts";
 // Who the booking is for. Set when the booking is created; after that a
 // client update may only fill a blank, never change a stored value.
 const CUSTOMER_FIELDS = ["name", "phonenumber", "email"] as const;
-// A therapist changes none of the customer's details, not even a blank (client rule).
-const THERAPIST_LOCKED = [...CUSTOMER_FIELDS, "location", "age", "gender"] as const;
+// A therapist changes none of the customer's details, not even a blank, and
+// doesn't move or reassign a visit: only the office does (client rule).
+const THERAPIST_LOCKED = [
+  ...CUSTOMER_FIELDS, "location", "age", "gender",
+  "doctorId", "doctor", "slot", "physioSlot", "therapyStartTime", "therapyEndTime",
+] as const;
 
 const blank = (v: unknown) => v === undefined || v === null || v === "";
 

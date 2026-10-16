@@ -110,10 +110,30 @@ describe("updateDoctorDetails - earnings split", () => {
     expect(savedUpdate().splitPercent).toBe(70);
   });
 
+  // A therapist whose own record is THR-0001.
+  const asTherapist = (body: any, id = "THR-0001") =>
+    ({ params: { id }, body, user: { role: "THERAPIST", _id: "u1", userEmail: "t@x.com" } }) as unknown as Request;
+  const ownRecord = () => mockDoctorFindOne.mockReturnValue({ lean: () => Promise.resolve({ doctorId: "THR-0001" }) });
+
   it("drops a split sent by a therapist, so they can't raise their own cut", async () => {
-    await updateDoctorDetails(updateReq("THERAPIST", { name: "T", splitPercent: 100 }), mockRes());
+    ownRecord();
+    await updateDoctorDetails(asTherapist({ name: "T", splitPercent: 100 }), mockRes());
     expect(savedUpdate()).not.toHaveProperty("splitPercent");
     expect(savedUpdate().name).toBe("T");
+  });
+
+  it("a therapist can't edit another therapist's profile (#19)", async () => {
+    ownRecord();
+    const res = mockRes();
+    await updateDoctorDetails(asTherapist({ name: "Hacked" }, "THR-0002"), res);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a therapist can't switch themselves off or change their ID", async () => {
+    ownRecord();
+    await updateDoctorDetails(asTherapist({ name: "T", isActive: false, doctorId: "THR-9999" }), mockRes());
+    expect(savedUpdate()).toMatchObject({ name: "T", isActive: undefined, doctorId: undefined });
   });
 
   it("rejects an out-of-range split from an admin", async () => {

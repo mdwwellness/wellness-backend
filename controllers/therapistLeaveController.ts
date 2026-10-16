@@ -1,6 +1,10 @@
 import type { Request, Response } from "express";
 import { TherapistLeave } from "../models/therapistLeaveModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
+import { mayActOnTherapist } from "../lib/payments.ts";
+
+const notOwn = (res: Response) =>
+  res.status(403).json({ success: false, message: "You can only change your own leave and days off." });
 
 /** GET /api/therapist-leaves — list all leaves (optionally filter by date) */
 export async function getLeaves(req: Request, res: Response) {
@@ -30,6 +34,7 @@ export async function getLeaves(req: Request, res: Response) {
 export async function createLeave(req: Request, res: Response) {
   try {
     const { doctorId, startDate, endDate, reason } = req.body;
+    if (!(await mayActOnTherapist(req.user as any, doctorId))) return notOwn(res);
     if (!doctorId || !startDate) {
       return res.status(400).json({
         success: false,
@@ -54,6 +59,8 @@ export async function createLeave(req: Request, res: Response) {
 export async function deleteLeave(req: Request, res: Response) {
   try {
     const { id } = req.params;
+    const leave = await TherapistLeave.findById(id).lean();
+    if (leave && !(await mayActOnTherapist(req.user as any, (leave as any).doctorId))) return notOwn(res);
     const deleted = await TherapistLeave.findByIdAndDelete(id);
     if (!deleted) {
       return res.status(404).json({ success: false, message: "Leave not found" });
@@ -69,6 +76,7 @@ export async function updateWeekOffDays(req: Request, res: Response) {
   try {
     const { doctorId } = req.params;
     const { weekOffDays } = req.body;
+    if (!(await mayActOnTherapist(req.user as any, doctorId))) return notOwn(res);
 
     if (!Array.isArray(weekOffDays)) {
       return res.status(400).json({

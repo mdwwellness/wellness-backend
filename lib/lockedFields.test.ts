@@ -33,6 +33,12 @@ describe("applyLockedFields", () => {
     expect(u).toEqual({ note: "kept" });
   });
 
+  it("a therapist can't move or reassign a visit, only the office can", async () => {
+    const u: any = { doctorId: "THR-9", doctor: "Me", slot: { date: "2026-10-20", time: "9:30" }, therapyStartTime: "9:30", therapyEndTime: "10:30", workChecklist: ["arrived"] };
+    await applyLockedFields(u, intake, "THERAPIST");
+    expect(u).toEqual({ workChecklist: ["arrived"] });
+  });
+
   it("a therapist can't cancel a booking, but can still start it", async () => {
     const cancel: any = { status: "cancelled" };
     await applyLockedFields(cancel, { ...intake, status: "scheduled" }, "THERAPIST");

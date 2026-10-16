@@ -26,7 +26,7 @@ import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
 import { applyLockedFields } from "../lib/lockedFields.ts";
 import { checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
-import { addonKey, courseSessionOf, dueForVisit, isAssignedTherapist, moneyRowFor, recordPayment, shortBeforeStart, unpaidBeforeComplete } from "../lib/payments.ts";
+import { addonKey, courseSessionOf, dueForVisit, isAssignedTherapist, mayActOnBooking, moneyRowFor, recordPayment, shortBeforeStart, unpaidBeforeComplete } from "../lib/payments.ts";
 import { referrerForCode } from "../lib/referralCode.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
@@ -191,6 +191,9 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
                 message: "Appointment not found",
             });
         }
+        if (!(await mayActOnBooking(req.user as any, appointment))) {
+            return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
+        }
 
         if (appointment.appointmentKind === "recommended") {
             return res.status(400).send({
@@ -290,6 +293,9 @@ export const sendAddonOtp = async (req: Request, res: Response) => {
         if (!appt) {
             return res.status(404).send({ success: false, message: "Appointment not found" });
         }
+        if (!(await mayActOnBooking(req.user as any, appt))) {
+            return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
+        }
         const exists = (appt.recommendedServices ?? []).some(
             (r) => r.serviceId === serviceId && r.recommendedAt === recommendedAt,
         );
@@ -338,6 +344,9 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
                 success: false,
                 message: "Appointment not found",
             });
+        }
+        if (!(await mayActOnBooking(req.user as any, appointment))) {
+            return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
         }
 
         const recs = appointment.recommendedServices ?? [];
@@ -557,6 +566,9 @@ export const completeSession = async (req: Request, res: Response) => {
                 success: false,
                 message: "Appointment not found",
             });
+        }
+        if (!(await mayActOnBooking(req.user as any, existing))) {
+            return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
         }
 
         // Per-visit proof-of-presence: no checkout until this visit's OTP is
@@ -810,6 +822,9 @@ export const updateAppointment = async (req: Request, res: Response) => {
                 success: false,
                 message: "Appointment not found",
             });
+        }
+        if (!(await mayActOnBooking(req.user as any, current))) {
+            return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
         }
         const cur = current as any;
 
@@ -1149,6 +1164,9 @@ export const createPaymentLink = async (req: Request, res: Response) => {
             return res
                 .status(404)
                 .send({ success: false, message: "Booking not found" });
+        }
+        if (!(await mayActOnBooking(req.user as any, appointment))) {
+            return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
         }
 
         if (!appointment.payToken) {

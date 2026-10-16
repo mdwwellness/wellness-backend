@@ -38,13 +38,35 @@ export async function moneyRowFor(row: any): Promise<any> {
   return (await AppointmentBooking.findById(id).exec()) ?? row;
 }
 
+/** The signed-in user's own therapist record id (doctorId), or null. */
+export async function ownDoctorId(user: PaymentUser | undefined): Promise<string | null> {
+  if (!user) return null;
+  // Only defined values: an undefined email would match every therapist.
+  const who: Record<string, unknown>[] = [];
+  if (user._id) who.push({ userId: String(user._id) });
+  if (user.userEmail) who.push({ email: user.userEmail });
+  if (!who.length) return null;
+  const doctor = await Doctor.findOne({ $or: who }, { doctorId: 1 }).lean();
+  return (doctor as any)?.doctorId ?? null;
+}
+
 /** True when `user` is the therapist assigned to this booking. */
 export async function isAssignedTherapist(user: PaymentUser | undefined, row: any): Promise<boolean> {
-  if (!user || !row?.doctorId) return false;
-  const doctor = await Doctor.findOne({
-    $or: [{ userId: String(user._id ?? "") }, { email: user.userEmail }],
-  }).lean();
-  return !!doctor && (doctor as any).doctorId === row.doctorId;
+  if (!row?.doctorId) return false;
+  return (await ownDoctorId(user)) === row.doctorId;
+}
+
+/**
+ * Office roles act on any booking; a therapist only on the bookings assigned to
+ * them (client rule: therapists don't touch other therapists' work).
+ */
+export async function mayActOnBooking(user: PaymentUser | undefined, row: any): Promise<boolean> {
+  return user?.role !== "THERAPIST" || isAssignedTherapist(user, row);
+}
+
+/** Office roles act on any therapist; a therapist only on themselves. */
+export async function mayActOnTherapist(user: PaymentUser | undefined, doctorId: unknown): Promise<boolean> {
+  return user?.role !== "THERAPIST" || (await ownDoctorId(user)) === String(doctorId ?? "");
 }
 
 /**

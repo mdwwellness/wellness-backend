@@ -9,6 +9,7 @@ import { logger } from "../lib/logger.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { canManageSplit, parseSplitPercent } from "../lib/therapistSplit.ts";
 import { withUniqueReferralCode } from "../lib/referralCode.ts";
+import { mayActOnTherapist } from "../lib/payments.ts";
 import { HIDDEN_FROM_THERAPISTS } from "../lib/bookingSource.ts";
 
 /**
@@ -192,6 +193,9 @@ export async function getPersonalAppointments(req: Request, res: Response) {
         message: "Id is required",
       })
     }
+    if (!(await mayActOnTherapist(req.user as any, id))) {
+      return res.status(403).send({ success: false, message: "You can only see your own visits." });
+    }
     const data = await AppointmentBookingModel.find({ doctorId: id })
       .select(req.user?.role === "THERAPIST" ? HIDDEN_FROM_THERAPISTS : "")
       .exec();
@@ -214,7 +218,15 @@ export async function getPersonalAppointments(req: Request, res: Response) {
 export async function updateDoctorDetails(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name, doctorId, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays } = req.body;
+    // A therapist edits only their own profile (#19), and can't switch
+    // themselves off or change their therapist ID.
+    if (!(await mayActOnTherapist(req.user as any, id))) {
+      return res.status(403).json({ message: "You can only edit your own profile." });
+    }
+    const isTherapist = (req.user as any)?.role === "THERAPIST";
+    const { name, phonenumber, email, specialization, bio, profileImage, certificates, weekOffDays } = req.body;
+    const doctorId = isTherapist ? undefined : req.body.doctorId;
+    const isActive = isTherapist ? undefined : req.body.isActive;
     const split = readSplitUpdate(req);
     if (split.error) return res.status(400).json({ message: split.error });
 
