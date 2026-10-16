@@ -8,6 +8,7 @@ import { nextSequence, nextYearlySequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { OFFERINGS } from "./offerings.ts";
 import { moneyRowFor } from "./payments.ts";
+import { addonLabel, courseLabel, visitLabel } from "./sessionDates.ts";
 import { birthYearFrom, customerAge, toGender } from "./personDetails.ts";
 
 type Actor = {
@@ -222,17 +223,22 @@ async function billedBooking(row: any): Promise<{ booking: any; billed: any }> {
   const booking = await moneyRowFor(row);
   const sessions = await AppointmentBooking.find(
     { packageOriginId: String(booking._id) },
-    { recommendedServices: 1 },
+    { recommendedServices: 1, payments: 1, slot: 1, physioSlot: 1, therapyStartTime: 1 },
   ).lean();
   const plain = typeof booking.toObject === "function" ? booking.toObject() : booking;
+  const visits = [plain, ...sessions];
   return {
     booking,
     billed: {
       ...plain,
-      recommendedServices: [
-        ...(plain.recommendedServices ?? []),
-        ...sessions.flatMap((v: any) => v.recommendedServices ?? []),
-      ],
+      // Each add-on remembers the visit it was recommended on, for its date.
+      recommendedServices: visits.flatMap((v: any) =>
+        (v.recommendedServices ?? []).map((r: any) => ({ ...r, _visit: v })),
+      ),
+      _sessionDates: visits.map((v: any) => v.slot?.date ?? v.physioSlot?.date).filter(Boolean),
+      _payments: visits
+        .flatMap((v: any) => v.payments ?? [])
+        .sort((a: any, b: any) => new Date(a.at).getTime() - new Date(b.at).getTime()),
     },
   };
 }
@@ -266,6 +272,8 @@ type MergedAddon = {
   paymentCollected: boolean;
   /** Paid so far (part-payments allowed). */
   paid: number;
+  /** When it's done (lib/sessionDates.ts); unknown for locked-only copies. */
+  session?: string;
 };
 
 /**
@@ -303,6 +311,7 @@ function mergeAddonItems(
       price: safeNumber(rec.quotedPrice),
       paymentCollected: !!rec.paymentCollected,
       paid: Math.min(safeNumber(rec.quotedPrice), safeNumber(addonPaidOf(rec))),
+      session: addonLabel(rec, rec._visit ?? appointment),
     });
   }
 
@@ -378,13 +387,31 @@ const ENQUIRY_OFFERINGS = new Set<string>(OFFERINGS);
  * There is one invoice per appointment (updated in place), so the main item is
  * charged a single time regardless of how many sessions have been completed.
  */
+/** One invoice line: what, its price, when it's done and how much is paid. */
+type InvoiceLine = { description: string; price: number; session?: string; paid?: number };
+
+/** Payments received on the booking, as the invoice keeps them. */
+function invoicePayments(billed: any) {
+  return (billed._payments ?? []).map((p: any) => ({
+    at: p.at,
+    method: p.method ?? "",
+    amount: safeNumber(p.amount),
+    for: p.for ?? "",
+  }));
+}
+
 async function buildLineItemsFromAppointment(
   appointment: any,
   service?: any,
   _invoice_type?: InvoiceType,
   lockedAddonItems?: any[],
-): Promise<{ description: string; price: number }[]> {
-  const line_items: { description: string; price: number }[] = [];
+): Promise<InvoiceLine[]> {
+  const line_items: InvoiceLine[] = [];
+  // The booking's own visit(s), and what's been paid towards its price.
+  const dates = appointment._sessionDates ?? [];
+  const session =
+    appointment.bookingKind === "course" && dates.length > 1 ? courseLabel(dates) : visitLabel(appointment);
+  const mainPaid = (price: number) => Math.min(price, safeNumber(appointment.paymentAmount));
 
   const confirmedService =
     !service?.isPackage &&
@@ -396,32 +423,41 @@ async function buildLineItemsFromAppointment(
   if (confirmedService) {
     // Pay-first funnel: the executive-confirmed booking type is authoritative -
     // NOT the stale `service` the customer first asked for on the public site.
-    line_items.push({
-      description: confirmedService,
-      price: resolveMainPrice(appointment, service) ?? 0,
-    });
+    const price = resolveMainPrice(appointment, service) ?? 0;
+    line_items.push({ description: confirmedService, price, session, paid: mainPaid(price) });
   } else {
     // Legacy path (no confirmed type): original service/package logic.
     if (hasConsultationCharge(appointment)) {
-      line_items.push({ description: "Online Consultation", price: CONSULT_FEE });
+      line_items.push({
+        description: "Online Consultation",
+        price: CONSULT_FEE,
+        session,
+        paid: appointment.consultationCompleted ? CONSULT_FEE : 0,
+      });
     }
     if (service?.isPackage) {
+      const price = resolveMainPrice(appointment, service) ?? 0;
       line_items.push({
         description: `${service.name} (${service.packageCount ?? "?"} sessions)`,
-        price: resolveMainPrice(appointment, service) ?? 0,
+        price,
+        session,
+        paid: mainPaid(price),
       });
     } else if (!hasConsultationCharge(appointment)) {
+      const price = resolveMainPrice(appointment, service) ?? 0;
       line_items.push({
         description:
           (appointment.service ?? "")?.toString() || service?.name || "Therapy",
-        price: resolveMainPrice(appointment, service) ?? 0,
+        price,
+        session,
+        paid: mainPaid(price),
       });
     }
   }
 
   // Add-ons (confirmed live + locked-on-invoice, deduped) - appended in all paths.
   for (const addon of mergeAddonItems(appointment, lockedAddonItems)) {
-    line_items.push({ description: addon.description, price: addon.price });
+    line_items.push({ description: addon.description, price: addon.price, session: addon.session, paid: addon.paid });
   }
 
   return line_items;
@@ -521,6 +557,7 @@ async function createInvoiceFromAppointment(args: {
       therapist_id: appointment.doctorId ?? "",
       address: (appointment.location ?? "").toString(),
       line_items,
+      payments: invoicePayments(billed),
       items_subtotal,
       advance_paid,
       balance_due,
@@ -650,6 +687,7 @@ export async function syncInvoiceFromAppointment(args: {
   existing.session_number = appointment.sessionNumber
     ? String(appointment.sessionNumber)
     : existing.session_number;
+  (existing as any).payments = invoicePayments(billed);
   existing.last_edited_by = editor;
   existing.last_edited_at = new Date();
 
@@ -665,7 +703,8 @@ export async function syncInvoiceFromAppointment(args: {
     existing.isModified("payment_status") ||
     existing.isModified("therapist_name") ||
     (existing as any).isModified("therapist_id") ||
-    existing.isModified("session_number");
+    existing.isModified("session_number") ||
+    existing.isModified("payments");
   if (pdfVisibleChanged) existing.pdf_url = null;
 
   await existing.save();

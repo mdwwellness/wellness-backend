@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import Invoice from "../models/invoiceModel.ts";
 import { uploadBuffer } from "./uploadthing.ts";
 import { drawMdwLogo } from "./mdwLogo.ts";
+import { paidAtLabel } from "./sessionDates.ts";
 
 type InvoiceDoc = InstanceType<typeof Invoice>;
 
@@ -25,6 +26,9 @@ const COLORS = {
   rowAlt: "#f7fbfd",
   border: "#e2e8f0",
   white: "#ffffff",
+  // Still to pay: a light yellow row, dark amber text.
+  due: "#fff4cc",
+  dueText: "#92400e",
 };
 
 const INVOICE_TYPE_LABELS: Record<string, string> = {
@@ -264,20 +268,35 @@ function drawServiceSection(
   return Math.max(ly, ry) + 12;
 }
 
+type PdfLine = { description: string; price: number; session?: string | null; paid?: number | null };
+
+/** "Paid", "Part paid", "Due", or "-" when the line carries no payment info. */
+function linePayment(item: PdfLine, invoicePaid: boolean): { text: string; due: boolean } {
+  if (item.paid == null) return { text: invoicePaid ? "Paid" : "-", due: false };
+  if (!(item.price > 0) || item.paid >= item.price) return { text: "Paid", due: false };
+  return { text: item.paid > 0 ? "Part paid" : "Due", due: true };
+}
+
 function drawServicesTable(
   doc: PDFKit.PDFDocument,
   y: number,
-  items: { description: string; price: number }[],
+  items: PdfLine[],
+  invoicePaid: boolean,
 ): number {
   const w = contentWidth();
   y = drawSectionHeading(doc, "Services & Charges", PAGE.margin, y, w);
   y += 2;
 
-  const colSno = 40;
-  const colAmt = 120;
-  const colDesc = w - colSno - colAmt;
+  const colSno = 28;
+  const colSession = 150;
+  const colPay = 62;
+  const colAmt = 84;
+  const colDesc = w - colSno - colSession - colPay - colAmt;
+  const xDesc = PAGE.margin + colSno;
+  const xSession = xDesc + colDesc;
+  const xPay = xSession + colSession;
+  const xAmt = xPay + colPay;
   const headerH = 24;
-  const rowH = 26;
 
   doc.save();
   doc.rect(PAGE.margin, y, w, headerH).fill(COLORS.light);
@@ -285,43 +304,50 @@ function drawServicesTable(
     .fillColor(COLORS.text)
     .font("Helvetica-Bold")
     .fontSize(9.5)
-    .text("S.No", PAGE.margin + 10, y + 8, { width: colSno - 10 })
-    .text("Service", PAGE.margin + colSno + 6, y + 8, { width: colDesc - 12 })
-    .text("Amount", PAGE.margin + colSno + colDesc, y + 8, {
-      width: colAmt - 10,
-      align: "right",
-    });
+    .text("#", PAGE.margin + 8, y + 8, { width: colSno - 8 })
+    .text("Service", xDesc + 4, y + 8, { width: colDesc - 8 })
+    .text("Session date", xSession + 4, y + 8, { width: colSession - 8 })
+    .text("Payment", xPay + 4, y + 8, { width: colPay - 8 })
+    .text("Amount", xAmt, y + 8, { width: colAmt - 10, align: "right" });
   doc.restore();
 
   let rowY = y + headerH;
   items.forEach((item, idx) => {
-    if (idx % 2 === 1) {
+    const session = item.session || "-";
+    const pay = linePayment(item, invoicePaid);
+    doc.font("Helvetica").fontSize(9.5);
+    const rowH = Math.max(
+      26,
+      doc.heightOfString(item.description, { width: colDesc - 8 }) + 14,
+      doc.heightOfString(session, { width: colSession - 8 }) + 14,
+    );
+
+    if (pay.due || idx % 2 === 1) {
       doc.save();
-      doc.rect(PAGE.margin, rowY, w, rowH).fill(COLORS.rowAlt);
+      doc.rect(PAGE.margin, rowY, w, rowH).fill(pay.due ? COLORS.due : COLORS.rowAlt);
       doc.restore();
     }
     doc
       .fillColor(COLORS.primary)
       .font("Helvetica-Bold")
-      .fontSize(10)
-      .text(String(idx + 1), PAGE.margin + 10, rowY + 8, { width: colSno - 10 });
+      .fontSize(9.5)
+      .text(String(idx + 1), PAGE.margin + 8, rowY + 8, { width: colSno - 8 });
     doc
       .fillColor(COLORS.text)
       .font("Helvetica")
-      .fontSize(10)
-      .text(item.description, PAGE.margin + colSno + 6, rowY + 8, {
-        width: colDesc - 12,
-        lineBreak: false,
-        ellipsis: true,
-      });
+      .fontSize(9.5)
+      .text(item.description, xDesc + 4, rowY + 8, { width: colDesc - 8 })
+      .text(session, xSession + 4, rowY + 8, { width: colSession - 8 });
+    doc
+      .fillColor(pay.due ? COLORS.dueText : COLORS.text)
+      .font(pay.due ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(9.5)
+      .text(pay.text, xPay + 4, rowY + 8, { width: colPay - 8 });
     doc
       .fillColor(COLORS.text)
       .font("Helvetica-Bold")
-      .fontSize(10)
-      .text(formatINR(item.price), PAGE.margin + colSno + colDesc, rowY + 8, {
-        width: colAmt - 10,
-        align: "right",
-      });
+      .fontSize(9.5)
+      .text(formatINR(item.price), xAmt, rowY + 8, { width: colAmt - 10, align: "right" });
     rowY += rowH;
   });
 
@@ -332,6 +358,12 @@ function drawServicesTable(
     .stroke();
 
   return rowY + 16;
+}
+
+/** "UPI", "Cash", "Card"... for a stored payment method. */
+function methodLabel(m: string): string {
+  if (!m) return "";
+  return m.toLowerCase() === "upi" ? "UPI" : m[0].toUpperCase() + m.slice(1);
 }
 
 function drawPaymentAndTotals(
@@ -360,18 +392,50 @@ function drawPaymentAndTotals(
     .fontSize(11)
     .text(paymentLabel, leftX, afterHead + 2);
 
+  // Payments received, one per line, amount right-aligned.
+  const payments = ((invoice as any).payments ?? []) as { at: Date; method?: string; amount: number; for?: string }[];
+  doc
+    .fillColor(COLORS.text)
+    .font("Helvetica-Bold")
+    .fontSize(9.5)
+    .text("Payments received", leftX, afterHead + 22);
+  let payY = afterHead + 36;
+  if (!payments.length) {
+    doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("None yet", leftX + 6, payY);
+    payY += 14;
+  }
+  for (const p of payments) {
+    const what = [paidAtLabel(p.at), methodLabel(p.method ?? ""), p.for ? `for ${p.for}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    // A long one wraps under itself; the next starts below it.
+    const whatW = leftW - 96;
+    doc
+      .fillColor(COLORS.muted)
+      .font("Helvetica")
+      .fontSize(9)
+      .text(what, leftX + 6, payY, { width: whatW });
+    const whatH = doc.heightOfString(what, { width: whatW });
+    doc
+      .fillColor(COLORS.text)
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .text(formatINR(p.amount), leftX + leftW - 90, payY, { width: 90, align: "right" });
+    payY += Math.max(14, whatH + 4);
+  }
+
   doc
     .fillColor(COLORS.muted)
     .font("Helvetica")
     .fontSize(9)
-    .text("Notes:", leftX, afterHead + 22);
+    .text("Notes:", leftX, payY + 10);
 
   const notes = [
     "Please keep this invoice for your records and insurance claims.",
     "For billing queries, contact our customer support within 7 days.",
     "Session packages are non-refundable once activated unless stated otherwise.",
   ];
-  let noteY = afterHead + 36;
+  let noteY = payY + 24;
   for (const note of notes) {
     doc
       .fillColor(COLORS.muted)
@@ -381,14 +445,16 @@ function drawPaymentAndTotals(
     noteY = doc.y + 3;
   }
 
-  // Right: totals panel.
-  const rows: [string, string, boolean][] = [
-    ["Subtotal", formatINR(invoice.items_subtotal), false],
-    ["Amount paid", formatINR(invoice.advance_paid), false],
-    ["Balance due", formatINR(invoice.balance_due), false],
-    ["Payable amount", formatINR(invoice.total), true],
+  // Right: totals, one per line, amounts right-aligned. What's still to pay is
+  // in yellow.
+  const due = Number(invoice.balance_due) || 0;
+  const rows: { label: string; value: string; strong?: boolean; due?: boolean }[] = [
+    { label: "Total", value: formatINR(invoice.total) },
+    { label: "Paid", value: formatINR(invoice.advance_paid) },
+    { label: "Amount due", value: formatINR(due), strong: true, due: due > 0 },
   ];
-  const panelH = 14 + rows.length * 22 + 10;
+  const rowH = 22;
+  const panelH = rows.length * rowH + 4;
   doc.save();
   doc.rect(panelX, y, panelW, panelH).fill(COLORS.panel);
   doc
@@ -396,27 +462,23 @@ function drawPaymentAndTotals(
     .strokeColor(COLORS.border)
     .lineWidth(1)
     .stroke();
-  let ry = y + 14;
-  for (const [label, value, highlight] of rows) {
-    if (highlight) {
-      doc
-        .moveTo(panelX + 12, ry - 5)
-        .lineTo(panelX + panelW - 12, ry - 5)
-        .strokeColor(COLORS.border)
-        .lineWidth(1)
-        .stroke();
+  let ry = y + 8;
+  for (const row of rows) {
+    if (row.due) {
+      doc.rect(panelX + 1, ry - 6, panelW - 2, rowH).fill(COLORS.due);
     }
+    const color = row.due ? COLORS.dueText : row.strong ? COLORS.primary : COLORS.text;
     doc
-      .fillColor(highlight ? COLORS.primary : COLORS.muted)
-      .font(highlight ? "Helvetica-Bold" : "Helvetica")
-      .fontSize(highlight ? 11 : 10)
-      .text(label, panelX + 14, ry, { width: 120 });
+      .fillColor(row.strong ? color : COLORS.muted)
+      .font(row.strong ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(row.strong ? 11 : 10)
+      .text(row.label, panelX + 14, ry, { width: 120 });
     doc
-      .fillColor(highlight ? COLORS.primary : COLORS.text)
-      .font(highlight ? "Helvetica-Bold" : "Helvetica")
-      .fontSize(highlight ? 12 : 10)
-      .text(value, panelX + 120, ry, { width: panelW - 134, align: "right" });
-    ry += 22;
+      .fillColor(color)
+      .font(row.strong ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(row.strong ? 11 : 10)
+      .text(row.value, panelX + 120, ry, { width: panelW - 134, align: "right" });
+    ry += rowH;
   }
   doc.restore();
 
@@ -497,7 +559,6 @@ function buildInvoicePdf(invoice: InvoiceDoc): PDFKit.PDFDocument {
   if (invoice.package_name) serviceRows.push(["Package", invoice.package_name]);
   if (invoice.session_number)
     serviceRows.push(["Session", String(invoice.session_number)]);
-  serviceRows.push(["Service type", invoiceTypeLabel(invoice.invoice_type)]);
 
   const address = ((invoice as any).address ?? "").toString().trim();
   y = drawServiceSection(doc, y, serviceRows, address);
@@ -511,7 +572,7 @@ function buildInvoicePdf(invoice: InvoiceDoc): PDFKit.PDFDocument {
             price: invoice.total,
           },
         ];
-  y = drawServicesTable(doc, y, items);
+  y = drawServicesTable(doc, y, items as PdfLine[], invoice.payment_status === "paid");
 
   drawPaymentAndTotals(doc, y, invoice);
 

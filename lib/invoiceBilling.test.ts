@@ -45,10 +45,10 @@ beforeEach(() => {
   m.created.length = 0;
   m.rows = {
     // Session 1 = the booking: ₹6,400 course, ₹3,200 paid.
-    b1: { _id: "b1", enquiryId: "ENQ-1", name: "Asha", phonenumber: 9876500001, bookingKind: "course", quotedPrice: 6400, paymentAmount: 3200, status: "completed", totalSessions: 4, recommendedServices: [] },
+    b1: { _id: "b1", enquiryId: "ENQ-1", name: "Asha", phonenumber: 9876500001, bookingKind: "course", quotedPrice: 6400, paymentAmount: 3200, status: "completed", totalSessions: 4, recommendedServices: [], slot: { date: new Date("2026-10-16T00:00:00Z"), time: "10:30" }, payments: [{ amount: 3200, method: "upi", at: new Date("2026-10-16T05:00:00Z") }] },
     // Session 2 of it, priced at its ₹1,600 share, now checked out.
     s2: {
-      _id: "s2", enquiryId: "ENQ-2", name: "Asha", phonenumber: 9876500001, bookingKind: "course", quotedPrice: 1600, status: "completed", packageOriginId: "b1", sessionNumber: 2,
+      _id: "s2", enquiryId: "ENQ-2", name: "Asha", phonenumber: 9876500001, bookingKind: "course", quotedPrice: 1600, status: "completed", packageOriginId: "b1", sessionNumber: 2, slot: { date: new Date("2026-10-23T00:00:00Z"), time: "10:30" }, payments: [{ amount: 400, method: "cash", at: new Date("2026-10-23T05:30:00Z"), for: "Dry Needling" }],
       recommendedServices: [{ serviceId: "SRV-1", serviceName: "Dry Needling", quotedPrice: 400, status: "confirmed", recommendedAt: "t1", payments: [{ amount: 400 }], paidAmount: 400 }],
     },
     // An add-on visit of it.
@@ -66,6 +66,13 @@ describe("one invoice per booking", () => {
     // The add-on recommended (and paid) during session 2 is on the booking's bill.
     expect(inv.line_items.map((l: any) => `${l.description} ${l.price}`)).toEqual(["Therapy 6400", "Add-on: Dry Needling 400"]);
     expect(inv).toMatchObject({ total: 6800, advance_paid: 3600, balance_due: 3200 });
+    // Each line says when it's done and how much of it is paid.
+    expect(inv.line_items).toMatchObject([
+      { session: "16 Oct 2026 to 23 Oct 2026, 2 sessions", paid: 3200 },
+      { session: "23 Oct 2026, same visit", paid: 400 },
+    ]);
+    // Payments from the booking and its sessions, oldest first.
+    expect(inv.payments.map((p: any) => `${p.amount} ${p.method} ${p.for}`.trim())).toEqual(["3200 upi", "400 cash Dry Needling"]);
   });
 
   it("a course session or an add-on visit never gets its own invoice", async () => {

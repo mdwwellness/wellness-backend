@@ -4,6 +4,23 @@ const lineItemSchema = new Schema(
   {
     description: { type: String, required: true, trim: true },
     price: { type: Number, required: true, min: 0 },
+    // When it's done, e.g. "16 Oct 2026, 4:30 PM" (lib/sessionDates.ts), and
+    // how much of the price is paid. Set by the booking sync; absent on manual
+    // and older invoices.
+    session: { type: String },
+    paid: { type: Number, min: 0 },
+  },
+  { _id: false },
+);
+
+// A payment received against this invoice's booking (copied by the sync).
+const paymentSchema = new Schema(
+  {
+    at: { type: Date, required: true },
+    method: { type: String, default: "" },
+    amount: { type: Number, required: true, min: 0 },
+    // What it was for, when it was an add-on.
+    for: { type: String, default: "" },
   },
   { _id: false },
 );
@@ -74,6 +91,7 @@ const invoiceSchema = new Schema(
     address: { type: String, default: "" },
 
     line_items: { type: [lineItemSchema], default: [] },
+    payments: { type: [paymentSchema], default: [] },
 
     // Add-ons committed to this invoice permanently at session completion, so
     // clearing appointment.recommendedServices (per-visit scratch space) never
