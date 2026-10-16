@@ -1,6 +1,6 @@
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { nextSequence } from "./counters.ts";
-import { findTherapistClash } from "./bookingService.ts";
+import { bookingTimeProblem, findTherapistClash } from "./bookingService.ts";
 import { addonKey } from "./payments.ts";
 
 /**
@@ -79,6 +79,8 @@ export async function checkAddonSchedule(
   const end = endTime(time, durationMin);
   for (const s of addonSessions(rec, booking)) {
     if (s.inVisit) continue;
+    const timeProblem = bookingTimeProblem(s.date, time, end);
+    if (timeProblem) return { ok: false, code: 400, message: timeProblem };
     const clash = await findTherapistClash({ doctorId: booking.doctorId, date: s.date, start: time, end, excludeId: booking._id });
     if (clash) {
       return { ok: false, code: 409, message: `${booking.doctor ?? "The therapist"} ${clash} on ${s.date}.` };

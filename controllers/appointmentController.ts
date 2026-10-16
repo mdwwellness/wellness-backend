@@ -15,7 +15,7 @@ import {
     maybeCreateInvoiceForAppointment,
     safeSyncInvoiceFromAppointment,
 } from "../lib/invoiceGeneration.ts";
-import { createBooking, findTherapistClash } from "../lib/bookingService.ts";
+import { bookingTimeProblem, createBooking, findTherapistClash } from "../lib/bookingService.ts";
 import {
     BOOKING_SOURCES,
     HIDDEN_FROM_THERAPISTS,
@@ -984,6 +984,10 @@ export const updateAppointment = async (req: Request, res: Response) => {
         ];
         const [doctorId, date, start, end] = spanOf(after);
         const moving = spanOf(after).join("|") !== spanOf(cur).join("|");
+        if (moving && date && start && after.status !== "cancelled") {
+            const timeProblem = bookingTimeProblem(date, start, end);
+            if (timeProblem) return res.status(400).send({ success: false, message: timeProblem });
+        }
         if (moving && doctorId && date && start && after.status !== "cancelled") {
             const clash = await findTherapistClash({ doctorId, date, start, end, excludeId: cur._id });
             if (clash) {

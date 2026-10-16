@@ -13,7 +13,7 @@ vi.mock("./logger.ts", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: v
 vi.mock("./bookingSource.ts", () => ({ resolveBookingSource: async () => ({ ok: true, fields: {} }) }));
 vi.mock("./invoiceGeneration.ts", () => ({ ensureCustomerForAppointment: vi.fn(), maybeCreateInvoiceForAppointment: vi.fn() }));
 
-import { createBooking, findTherapistClash } from "./bookingService.ts";
+import { bookingTimeProblem, createBooking, findTherapistClash } from "./bookingService.ts";
 
 const DAY = "2027-01-15";
 const at = (start: string, end?: string) => findTherapistClash({ doctorId: "THR-1", date: DAY, start, end });
@@ -88,5 +88,27 @@ describe("createBooking: a course checks every session before saving", () => {
       sessionsPerWeek: 2,
     });
     expect(result).toMatchObject({ ok: false, code: 409, message: "That therapist is already booked at 10:30 on 2027-01-18 (session 2)." });
+  });
+});
+
+describe("bookingTimeProblem: the day ends at 8:30 PM (B2 #7)", () => {
+  // 16 Oct 2026 in India, at the given time.
+  const at = (hhmm: string) => new Date(`2026-10-16T${hhmm}:00+05:30`).getTime();
+
+  it("a visit must finish by 8:30 PM", () => {
+    expect(bookingTimeProblem("2026-10-20", "19:30", "20:30", at("10:00"))).toBeNull();
+    expect(bookingTimeProblem("2026-10-20", "19:30", "21:00", at("10:00"))).toBe(
+      "Visits must finish by 8:30 PM - this one would end at 9:00 PM. Pick an earlier time.",
+    );
+    // No end time: an hour.
+    expect(bookingTimeProblem("2026-10-20", "20:30", undefined, at("10:00"))).toMatch(/would end at 9:30 PM/);
+  });
+
+  it("from 8:30 PM, today can't be booked; tomorrow can", () => {
+    expect(bookingTimeProblem("2026-10-16", "18:30", "19:30", at("20:29"))).toBeNull();
+    expect(bookingTimeProblem("2026-10-16", "18:30", "19:30", at("20:30"))).toBe(
+      "Bookings for today closed at 8:30 PM - pick tomorrow or later.",
+    );
+    expect(bookingTimeProblem("2026-10-17", "09:30", "10:30", at("22:00"))).toBeNull();
   });
 });

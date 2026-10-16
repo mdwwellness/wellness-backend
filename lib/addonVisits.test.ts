@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockClash } = vi.hoisted(() => ({ mockClash: vi.fn() }));
-vi.mock("./bookingService.ts", () => ({ findTherapistClash: mockClash }));
+vi.mock("./bookingService.ts", () => ({ findTherapistClash: mockClash, bookingTimeProblem: () => null }));
 vi.mock("../models/appointmentsBookingModel.ts", () => ({ default: {} }));
 vi.mock("../models/doctorsModel.ts", () => ({ Doctor: {} }));
 vi.mock("./counters.ts", () => ({ nextSequence: vi.fn() }));

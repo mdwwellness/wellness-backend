@@ -4,6 +4,7 @@ import { nextSequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { resolveBookingSource } from "./bookingSource.ts";
 import { cataloguePrice, isIntake } from "./lockedFields.ts";
+import { todayInIndia } from "./personDetails.ts";
 import {
   ensureCustomerForAppointment,
   maybeCreateInvoiceForAppointment,
@@ -116,6 +117,44 @@ export function courseDayOffset(n: number, s: CourseSchedule): number {
   return k * s.intervalDays;
 }
 
+// The day ends at 8:30 PM (B2 #7): a visit finishes by then, and from then on
+// nothing more can be booked for today. Mirrors the dashboard's LAST_END_MIN.
+const LAST_END_MIN = 20 * 60 + 30;
+const IST_OFFSET_MS = 330 * 60_000;
+
+/** "9:30 PM" for minutes from midnight. */
+function clock(min: number): string {
+  const h = Math.floor(min / 60);
+  return `${h % 12 || 12}:${String(min % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
+/**
+ * Why a visit can't be given this time, or null when it can: it would end
+ * after 8:30 PM, or it's for today and today's bookings have closed (8:30 PM).
+ * A full sentence, shared by every path that gives a visit a time.
+ */
+export function bookingTimeProblem(
+  date: string | Date,
+  start: string,
+  end?: string,
+  now = Date.now(),
+): string | null {
+  const startMin = toMinutes(start);
+  if (Number.isNaN(startMin)) return null;
+  const endRaw = toMinutes(end);
+  const endMin = endRaw > startMin ? endRaw : startMin + DEFAULT_VISIT_MIN;
+  if (endMin > LAST_END_MIN) {
+    return `Visits must finish by 8:30 PM - this one would end at ${clock(endMin)}. Pick an earlier time.`;
+  }
+  const day = typeof date === "string" ? date.slice(0, 10) : new Date(date).toISOString().slice(0, 10);
+  const india = new Date(now + IST_OFFSET_MS);
+  const nowMin = india.getUTCHours() * 60 + india.getUTCMinutes();
+  if (day === todayInIndia(now) && nowMin >= LAST_END_MIN) {
+    return "Bookings for today closed at 8:30 PM - pick tomorrow or later.";
+  }
+  return null;
+}
+
 /** "yyyy-MM-dd" of session `n` (1-based) of a course starting on `first`. */
 function courseSessionDate(first: string | Date, n: number, s: CourseSchedule): string {
   const d = new Date(first);
@@ -165,14 +204,19 @@ export async function createBooking(
     }
   }
 
-  // Double-booking guard - only when therapist + full slot are given. A course
-  // checks every session it will create (below), before anything is saved.
-  if (input.doctorId && input.slot?.date && input.slot?.time) {
+  // Time guards - only when a full slot is given. A course checks every session
+  // it will create (below), before anything is saved: each must end by 8:30 PM
+  // (and not be today after then), and a therapist on it must be free.
+  if (input.slot?.date && input.slot?.time) {
     const total = Number(input.totalSessions) || 0;
     const schedule = courseScheduleOf(input);
     const sessions = input.bookingKind === "course" && total > 1 && schedule ? total : 1;
     for (let n = 1; n <= sessions; n++) {
       const date = n === 1 ? input.slot.date : courseSessionDate(input.slot.date, n, schedule!);
+      const start = input.therapyStartTime || input.slot.time;
+      const timeProblem = bookingTimeProblem(date, start, input.therapyEndTime);
+      if (timeProblem) return { ok: false, code: 400, message: timeProblem };
+      if (!input.doctorId) continue;
       const clash = await findTherapistClash({
         doctorId: input.doctorId,
         date,
