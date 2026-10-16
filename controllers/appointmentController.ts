@@ -580,6 +580,21 @@ export const completeSession = async (req: Request, res: Response) => {
             });
         }
 
+        // A therapist finishes only once the work is recorded: Service performed
+        // ticked and a session note written. The tick can arrive with this
+        // request (it may still be saving). The office's "Complete anyway" on
+        // their behalf is the recorded override.
+        const sessionNote =
+            (typeof req.body?.note === "string" ? req.body.note : "") || existing.note || "";
+        const performed =
+            req.body?.performed === true || (existing.workChecklist ?? []).includes("performed");
+        if ((req.user as any)?.role === "THERAPIST" && (!performed || !sessionNote.trim())) {
+            return res.status(400).send({
+                success: false,
+                message: "Tick Service performed and write the session note first.",
+            });
+        }
+
         // Everything this visit owes is collected before it closes - a single
         // or last visit has no later visit to collect it on.
         const unpaid = unpaidBeforeComplete(existing, await moneyRowFor(existing));
@@ -713,9 +728,11 @@ export const completeSession = async (req: Request, res: Response) => {
                     sessionNotes: {
                         session: ownSession?.session ?? existing.addonOf?.session ?? sessionsDone,
                         at: new Date().toISOString(),
-                        note: (typeof req.body?.note === "string" ? req.body.note : "") || existing.note || "",
+                        note: sessionNote,
                         therapist: existing.doctor ?? "",
                         by: actorName,
+                        performed,
+                        verifiedAt: existing.visitOtpVerifiedAt ?? undefined,
                     },
                 },
             },
@@ -737,7 +754,6 @@ export const completeSession = async (req: Request, res: Response) => {
         // appears in "Therapist Notes (Customer History)" on the appointment panel.
         // Only push when there is actually a note to record. Non-fatal: completion
         // must never fail just because the customer-note write failed.
-        const sessionNote = (typeof req.body?.note === "string" ? req.body.note : "") || existing.note || "";
         if (sessionNote.trim() && existing.phonenumber) {
             try {
                 await Customer.findOneAndUpdate(

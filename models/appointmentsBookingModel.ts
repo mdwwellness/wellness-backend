@@ -317,6 +317,10 @@ const AppointmentBookingSchema = new Schema({
             note: { type: String, default: "" },
             therapist: { type: String, default: "" },
             by: { type: String, default: "" },
+            // What was recorded for this visit: Service performed ticked, and
+            // when the customer's code was verified.
+            performed: { type: Boolean },
+            verifiedAt: { type: Date },
         },
     ],
 

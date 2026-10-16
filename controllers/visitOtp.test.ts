@@ -20,7 +20,7 @@ vi.mock("bcryptjs", () => ({
   default: { compare: vi.fn(async (a: string) => a === "1234"), hash: vi.fn(async () => "hash") },
 }));
 
-import { updateAppointment, verifyVisitOtp } from "./appointmentController.ts";
+import { completeSession, updateAppointment, verifyVisitOtp } from "./appointmentController.ts";
 
 function res() {
   const r: any = {};
@@ -111,5 +111,31 @@ describe("updateAppointment - lead lock", () => {
     const r = res();
     await updateAppointment(put("STAFF", "exec2"), r);
     expect(r.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe("completeSession: the work is recorded first", () => {
+  const done = (body: object, role = "THERAPIST") =>
+    ({ params: { id: "a1" }, body, user: { _id: "u1", role, userEmail: "t@x.com" } }) as unknown as Request;
+
+  beforeEach(() => {
+    appt.visitOtpVerified = true;
+  });
+
+  it("refuses a therapist who hasn't ticked Service performed or written a note", async () => {
+    for (const body of [{}, { note: "Lower back, dry needling" }, { performed: true }, { performed: true, note: "  " }]) {
+      const r = res();
+      await completeSession(done(body), r);
+      expect(r.status).toHaveBeenCalledWith(400);
+      expect(r.send.mock.calls[0][0].message).toBe("Tick Service performed and write the session note first.");
+    }
+  });
+
+  it("a tick already saved on the visit counts", async () => {
+    appt.workChecklist = ["arrived", "performed"];
+    const r = res();
+    await completeSession(done({ note: "Lower back, dry needling" }), r);
+    // Past the work check: whatever it hits next, it isn't this refusal.
+    expect(r.send.mock.calls[0]?.[0]?.message).not.toBe("Tick Service performed and write the session note first.");
   });
 });
