@@ -15,7 +15,7 @@ import {
     maybeCreateInvoiceForAppointment,
     safeSyncInvoiceFromAppointment,
 } from "../lib/invoiceGeneration.ts";
-import { createBooking } from "../lib/bookingService.ts";
+import { createBooking, findTherapistClash } from "../lib/bookingService.ts";
 import {
     BOOKING_SOURCES,
     HIDDEN_FROM_THERAPISTS,
@@ -76,6 +76,12 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
     }
 };
 
+
+/** "yyyy-MM-dd" of a stored slot date (Date or string), or "". */
+const dayKey = (d: unknown): string => {
+    const t = d ? new Date(d as string) : null;
+    return t && !Number.isNaN(t.getTime()) ? t.toISOString().slice(0, 10) : "";
+};
 
 export const getAllAppointments = async (req: Request, res: Response) => {
     try {
@@ -932,6 +938,28 @@ export const updateAppointment = async (req: Request, res: Response) => {
                         message: `${therapist?.name ?? "Therapist"} is on leave from ${leaveBlock.startDate} to ${leaveBlock.endDate}${leaveBlock.reason ? ` (${leaveBlock.reason})` : ""}. Pick a different date or therapist.`,
                     });
                 }
+            }
+        }
+
+        // ── Clash gate: a new therapist, day or time must be free, with the
+        // booking gap either side (client rule, no override). Only a real move
+        // is checked: whole-record PUTs echo the stored slot.
+        const after = { ...cur, ...updateData };
+        const spanOf = (v: any) => [
+            v.doctorId ?? "",
+            dayKey(v.slot?.date),
+            v.therapyStartTime || v.physioSlot?.time || v.slot?.time || "",
+            v.therapyEndTime ?? "",
+        ];
+        const [doctorId, date, start, end] = spanOf(after);
+        const moving = spanOf(after).join("|") !== spanOf(cur).join("|");
+        if (moving && doctorId && date && start && after.status !== "cancelled") {
+            const clash = await findTherapistClash({ doctorId, date, start, end, excludeId: cur._id });
+            if (clash) {
+                return res.status(409).send({
+                    success: false,
+                    message: `${after.doctor ?? "That therapist"} ${clash}.`,
+                });
             }
         }
 

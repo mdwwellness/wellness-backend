@@ -1,4 +1,5 @@
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
+import ClinicSettings from "../models/clinicSettingsModel.ts";
 import { nextSequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { resolveBookingSource } from "./bookingSource.ts";
@@ -35,39 +36,68 @@ export type CreateBookingResult =
   | { ok: true; folded: true; appointment: any; repeatCount: number }
   | { ok: true; folded: false; appointment: any };
 
+// A visit with no stored end time is taken to last this long.
+const DEFAULT_VISIT_MIN = 60;
+
+/** "9:30" or "09:30" → minutes from midnight; anything else → NaN. */
+function toMinutes(t: unknown): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(t ?? "").trim());
+  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+}
+
 /**
- * An existing, non-cancelled visit of this therapist on this date that starts
- * at the same time or overlaps [start, end). Shared by every path that books a
- * therapist (createBooking, add-on visits) so the rule lives in one place.
+ * Why this therapist can't take [start, end) on `date`, or null when they can.
+ * Overlapping another visit, or leaving less than the clinic's booking gap
+ * before or after one, are both refused (client rule): only cancelling that
+ * visit frees the time. Reads like "is already booked at 14:30", for callers to
+ * put after the therapist's name. Shared by every path that books a
+ * therapist's time (createBooking, add-on visits, moving a visit) so the rule
+ * lives in one place. Mirrors checkConflict in the dashboard.
  */
 export async function findTherapistClash(args: {
   doctorId: string;
   date: string | Date;
   start: string;
-  end: string;
+  end?: string;
   excludeId?: unknown;
-}): Promise<any> {
-  return AppointmentBooking.findOne({
-    doctorId: args.doctorId,
-    "slot.date": args.date,
-    status: { $ne: "cancelled" },
-    ...(args.excludeId ? { _id: { $ne: args.excludeId } } : {}),
-    $or: [
-      // Exact time match
-      { "slot.time": args.start },
-      // Overlapping time window
+}): Promise<string | null> {
+  const startMin = toMinutes(args.start);
+  if (Number.isNaN(startMin)) return null;
+  const endRaw = toMinutes(args.end);
+  const endMin = endRaw > startMin ? endRaw : startMin + DEFAULT_VISIT_MIN;
+
+  const [visits, settings] = await Promise.all([
+    AppointmentBooking.find(
       {
-        therapyStartTime: { $ne: null },
-        therapyEndTime: { $ne: null },
-        $expr: {
-          $and: [
-            { $lt: ["$therapyStartTime", args.end] },
-            { $gt: ["$therapyEndTime", args.start] },
-          ],
-        },
+        doctorId: args.doctorId,
+        "slot.date": args.date,
+        status: { $ne: "cancelled" },
+        ...(args.excludeId ? { _id: { $ne: args.excludeId } } : {}),
       },
-    ],
-  }).exec();
+      { slot: 1, physioSlot: 1, therapyStartTime: 1, therapyEndTime: 1 },
+    ).lean(),
+    ClinicSettings.findOne({ key: "global" }, { bookingGapMinutes: 1 }).lean(),
+  ]);
+  const gap = (settings as any)?.bookingGapMinutes ?? 60;
+
+  for (const v of visits as any[]) {
+    const time = v.therapyStartTime || v.physioSlot?.time || v.slot?.time;
+    const vStart = toMinutes(time);
+    if (Number.isNaN(vStart)) continue;
+    const vEndRaw = toMinutes(v.therapyEndTime);
+    const vEnd = vEndRaw > vStart ? vEndRaw : vStart + DEFAULT_VISIT_MIN;
+    if (startMin < vEnd && vStart < endMin) return `is already booked at ${time}`;
+    const between = endMin <= vStart ? vStart - endMin : startMin - vEnd;
+    if (between < gap) return `needs ${gap} min between visits and has one at ${time}`;
+  }
+  return null;
+}
+
+/** "yyyy-MM-dd" of session `n` (1-based) of a course starting on `first`. */
+function courseSessionDate(first: string | Date, n: number, intervalDays: number): string {
+  const d = new Date(first);
+  d.setDate(d.getDate() + (n - 1) * intervalDays);
+  return d.toISOString().split("T")[0];
 }
 
 /**
@@ -112,20 +142,27 @@ export async function createBooking(
     }
   }
 
-  // Double-booking guard - only when therapist + full slot are given.
+  // Double-booking guard - only when therapist + full slot are given. A course
+  // checks every session it will create (below), before anything is saved.
   if (input.doctorId && input.slot?.date && input.slot?.time) {
-    const clash = await findTherapistClash({
-      doctorId: input.doctorId,
-      date: input.slot.date,
-      start: input.therapyStartTime || input.slot.time,
-      end: input.therapyEndTime || input.slot.time,
-    });
-    if (clash) {
-      return {
-        ok: false,
-        code: 409,
-        message: "That therapist is already booked at this date and time.",
-      };
+    const total = Number(input.totalSessions) || 0;
+    const every = Number(input.sessionIntervalDays) || 0;
+    const sessions = input.bookingKind === "course" && total > 1 && every > 0 ? total : 1;
+    for (let n = 1; n <= sessions; n++) {
+      const date = n === 1 ? input.slot.date : courseSessionDate(input.slot.date, n, every);
+      const clash = await findTherapistClash({
+        doctorId: input.doctorId,
+        date,
+        start: input.therapyStartTime || input.slot.time,
+        end: input.therapyEndTime,
+      });
+      if (clash) {
+        return {
+          ok: false,
+          code: 409,
+          message: `That therapist ${clash}${sessions > 1 ? ` on ${date} (session ${n})` : ""}.`,
+        };
+      }
     }
   }
 
@@ -289,25 +326,9 @@ export async function createBooking(
     try {
       const followUps: any[] = [];
       for (let i = 2; i <= totalSessions; i++) {
-        // Calculate date: session 1 date + (i-1) * intervalDays
-        const baseDate = new Date(input.slot.date);
-        const sessionDate = new Date(baseDate);
-        sessionDate.setDate(sessionDate.getDate() + (i - 1) * intervalDays);
-        const dateStr = sessionDate.toISOString().split("T")[0];
-
-        // Skip if the calculated date falls on a therapist's off-day or leave.
-        // The booking can still be created, but we log a warning.
-        if (input.doctorId) {
-          const onLeave = await AppointmentBooking.exists({
-            doctorId: input.doctorId,
-            "slot.date": dateStr,
-            "slot.time": input.slot.time,
-            status: { $ne: "cancelled" },
-          });
-          if (onLeave) {
-            logger.warn(`Session ${i} date ${dateStr} has a clash for therapist ${input.doctorId}`);
-          }
-        }
+        // Session 1 date + (i-1) * intervalDays. Its time was already checked
+        // free by the double-booking guard above.
+        const dateStr = courseSessionDate(input.slot.date, i, intervalDays);
 
         const followUpSeq = await nextSequence("enquiry");
         const followUpEnquiryId = `ENQ-${String(followUpSeq).padStart(4, "0")}`;

@@ -81,7 +81,7 @@ export async function checkAddonSchedule(
     if (s.inVisit) continue;
     const clash = await findTherapistClash({ doctorId: booking.doctorId, date: s.date, start: time, end, excludeId: booking._id });
     if (clash) {
-      return { ok: false, code: 409, message: `${booking.doctor ?? "The therapist"} is already booked on ${s.date} at ${time}.` };
+      return { ok: false, code: 409, message: `${booking.doctor ?? "The therapist"} ${clash} on ${s.date}.` };
     }
   }
   return {
