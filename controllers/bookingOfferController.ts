@@ -28,6 +28,20 @@ const lineEntry = (row: any, lineKind: string, key?: string) =>
     a.lineKind === lineKind && (lineKind !== "add_on" || a.addonKey === key),
   );
 
+const isHex24 = (s?: string) => !!s && /^[0-9a-fA-F]{24}$/.test(s);
+
+/** Find an offer by human offerId, Mongo _id, or promo code (first match wins). */
+async function resolveOffer(offerId?: string, code?: string) {
+  const clauses: any[] = [];
+  if (offerId) {
+    clauses.push({ offerId });
+    if (isHex24(offerId)) clauses.push({ _id: offerId });
+  }
+  if (code) clauses.push({ code: String(code).toUpperCase() });
+  if (!clauses.length) return null;
+  return Offer.findOne(clauses.length > 1 ? { $or: clauses } : clauses[0]).exec();
+}
+
 /** Has this phone already redeemed this offer on another booking? */
 async function phoneAlreadyUsed(phone: unknown, offerId: unknown, exceptId: unknown): Promise<boolean> {
   if (phone == null || phone === "") return false;
@@ -58,11 +72,7 @@ export const applyOffer = async (req: Request, res: Response) => {
     const booking = await AppointmentBooking.findById(req.params.bookingId).exec();
     if (!booking) return res.status(404).send({ success: false, message: "Booking not found" });
 
-    const offer = offerId
-      ? await Offer.findById(offerId).exec()
-      : code
-        ? await Offer.findOne({ code: String(code).toUpperCase() }).exec()
-        : null;
+    const offer = await resolveOffer(offerId, code);
     if (!offer) return res.status(404).send({ success: false, message: "Offer not found" });
 
     const kind = lineKind === "add_on" ? "add_on" : "main";
