@@ -65,6 +65,17 @@ describe("add-on money", () => {
     expect(unpaidBeforeComplete(booking, booking)).toEqual({ amount: 400, addons: ["Dry Needling"] });
   });
 
+  it("a confirmed same-day add-on is required before the session can START too", () => {
+    // The booking's own share is fully paid (1600/1600); only the add-on is owed,
+    // yet the session must not start until it is collected.
+    expect(shortBeforeStart(booking, booking)).toBe(400);
+  });
+
+  it("an add-on deferred to a later visit does not block today's start", () => {
+    const deferred = { ...booking, recommendedServices: [{ ...booking.recommendedServices[0], firstInVisit: false }] };
+    expect(shortBeforeStart(deferred, deferred)).toBe(0);
+  });
+
   it("an add-on visit needs its sessions-so-far share before it starts", () => {
     const visit3 = { addonOf: { bookingId: "b", key: "S|t", session: 3 } };
     expect(shortBeforeStart(visit3, { ...booking, recommendedServices: [{ ...booking.recommendedServices[0], paidAmount: 800 }] })).toBe(400);

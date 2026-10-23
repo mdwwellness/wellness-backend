@@ -444,6 +444,33 @@ const AppointmentBookingSchema = new Schema({
             _id: false,
         },
     ],
+
+    // ── Offers applied to this booking's priced lines (see apply-offer). ──
+    // One entry per discounted line; the source of truth for remove-offer and
+    // the once-per-phone / audit checks. The line's money (quotedPrice on the
+    // row or the add-on) already holds the post-offer price; `base` here is the
+    // pre-offer base so removal can restore it. Server-written only.
+    appliedOffers: [
+        {
+            offerId: { type: String },
+            offerName: { type: String },
+            code: { type: String },
+            kind: { type: String, enum: ["fixed", "percent"] },
+            amount: { type: Number },
+            off: { type: Number },           // rupees taken off at apply time
+            base: { type: Number },          // pre-offer base (for restore)
+            lineKind: { type: String, enum: ["main", "course", "add_on"] },
+            addonKey: { type: String },      // set only for add_on lines
+            absorbedBy: { type: String, enum: ["company", "therapist"] },
+            note: { type: String },
+            appliedBy: {
+                name: { type: String },
+                at: { type: String },
+                _id: false,
+            },
+            _id: false,
+        },
+    ],
 }, { timestamps: true, versionKey: false })
 
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);

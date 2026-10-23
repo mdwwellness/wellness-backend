@@ -108,20 +108,51 @@ export function courseSessionOf(row: any): { session: number; total: number } | 
   return null;
 }
 
-/** Still to collect before this visit can start (0 = it can start). */
+/**
+ * Unpaid amount for every add-on whose first session is done in THIS visit
+ * (status confirmed and not deferred to a later visit). A multi-session add-on
+ * contributes just this visit's session; its later sessions are paid at their
+ * own add-on visits. Zero means nothing is owed for same-visit add-ons.
+ */
+export function unpaidAddonsThisVisit(visitRow: any): { amount: number; addons: string[] } {
+  let amount = 0;
+  const addons: string[] = [];
+  for (const r of visitRow?.recommendedServices ?? []) {
+    if (r.status !== "confirmed" || r.firstInVisit === false) continue;
+    const needed = (Number(r.sessions) || 1) > 1 ? addonPerSession(r) : Number(r.quotedPrice) || 0;
+    const short = Math.max(0, needed - addonPaid(r));
+    if (short > 0) {
+      amount += short;
+      addons.push(r.serviceName);
+    }
+  }
+  return { amount, addons };
+}
+
+/**
+ * How much must be collected before this session can start: its own share PLUS
+ * everything already scheduled for the same day - i.e. every add-on confirmed
+ * to be done in this visit. Same-day work is paid in full up front; an add-on
+ * deferred to a later visit is left for that visit. (0 = it can start.)
+ */
 export function shortBeforeStart(visitRow: any, moneyRow: any): number {
   // ?.bookingId, not the object: a stored record has an empty addonOf even
   // when it isn't an add-on visit, and an empty object is truthy.
+  let own: number;
   if (visitRow?.addonOf?.bookingId) {
     const addon = findAddon(moneyRow, visitRow.addonOf.key);
-    if (!addon) return 0;
-    const needed = Math.min(
-      Number(addon.quotedPrice) || 0,
-      addonPerSession(addon) * (Number(visitRow.addonOf.session) || 1),
-    );
-    return Math.max(0, needed - addonPaid(addon));
+    if (!addon) own = 0;
+    else {
+      const needed = Math.min(
+        Number(addon.quotedPrice) || 0,
+        addonPerSession(addon) * (Number(visitRow.addonOf.session) || 1),
+      );
+      own = Math.max(0, needed - addonPaid(addon));
+    }
+  } else {
+    own = Math.max(0, paidNeededBeforeVisit(visitRow, moneyRow) - (Number(moneyRow?.paymentAmount) || 0));
   }
-  return Math.max(0, paidNeededBeforeVisit(visitRow, moneyRow) - (Number(moneyRow?.paymentAmount) || 0));
+  return own + unpaidAddonsThisVisit(visitRow).amount;
 }
 
 /** Everything still owed for this visit's own money (the most that can be paid now). */
@@ -136,24 +167,13 @@ export function dueForVisit(visitRow: any, moneyRow: any): number {
 }
 
 /**
- * What must still be collected before this visit can be completed: its own
- * share (as at the start), plus the session of every confirmed add-on done in
- * this visit (the whole add-on if it's a single session). An add-on's later
- * sessions are paid at their own visits. Zero means it can be completed.
+ * What must still be collected before this visit can be completed. The start
+ * gate already demands same-day add-ons, so this is the end-of-visit safety net
+ * for an add-on confirmed after the session had already begun. Zero means it
+ * can be completed.
  */
 export function unpaidBeforeComplete(visitRow: any, moneyRow: any): { amount: number; addons: string[] } {
-  let amount = shortBeforeStart(visitRow, moneyRow);
-  const addons: string[] = [];
-  for (const r of visitRow?.recommendedServices ?? []) {
-    if (r.status !== "confirmed" || r.firstInVisit === false) continue;
-    const needed = (Number(r.sessions) || 1) > 1 ? addonPerSession(r) : Number(r.quotedPrice) || 0;
-    const short = Math.max(0, needed - addonPaid(r));
-    if (short > 0) {
-      amount += short;
-      addons.push(r.serviceName);
-    }
-  }
-  return { amount, addons };
+  return { amount: shortBeforeStart(visitRow, moneyRow), addons: unpaidAddonsThisVisit(visitRow).addons };
 }
 
 export type RecordPaymentResult =

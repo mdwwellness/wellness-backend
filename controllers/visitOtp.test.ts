@@ -70,6 +70,21 @@ describe("verifyVisitOtp", () => {
     expect(mockFindOneAndUpdate).not.toHaveBeenCalled(); // no attempt used up
   });
 
+  it("won't start when a same-day add-on is unpaid, even though the session is paid", async () => {
+    appt.quotedPrice = 1600;
+    appt.paymentAmount = 1600; // session's own share fully settled
+    appt.recommendedServices = [
+      { serviceId: "X", recommendedAt: "t", serviceName: "Accupunture", quotedPrice: 500, sessions: 1, status: "confirmed", firstInVisit: true, paidAmount: 0 },
+    ];
+    const r = res();
+    await verifyVisitOtp(req("1234"), r);
+    expect(r.status).toHaveBeenCalledWith(402);
+    // short counts the add-on, due (the booking's own money) is 0, and the
+    // add-on is reported separately so the UI can point at Billing.
+    expect((r.send as any).mock.calls[0][0]).toMatchObject({ short: 500, due: 0, addonShort: 500, addons: ["Accupunture"] });
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled(); // no attempt used up
+  });
+
   it("refuses a therapist the visit isn't assigned to", async () => {
     mockDoctorFindOne.mockReturnValue({ lean: () => Promise.resolve({ doctorId: "THR-2" }) });
     const r = res();
