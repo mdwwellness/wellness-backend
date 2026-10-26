@@ -26,7 +26,7 @@ import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
 import { applyLockedFields } from "../lib/lockedFields.ts";
 import { checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
-import { addonKey, courseSessionOf, dueForVisit, isAssignedTherapist, mayActOnBooking, moneyRowFor, recordPayment, shortBeforeStart, unpaidAddonsThisVisit, unpaidBeforeComplete } from "../lib/payments.ts";
+import { addonKey, courseSessionOf, isAssignedTherapist, mayActOnBooking, moneyRowFor, recordPayment, unpaidBeforeComplete } from "../lib/payments.ts";
 import { referrerForCode } from "../lib/referralCode.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
@@ -521,22 +521,9 @@ export const verifyVisitOtp = async (req: Request, res: Response) => {
       return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
     }
 
-    // Collect at least today's session (plus any same-day add-on) before it
-    // starts (before any attempt is used up, so an unpaid visit doesn't burn
-    // the code's tries).
-    const money = await moneyRowFor(appt);
-    const short = shortBeforeStart(appt, money);
-    if (short > 0) {
-      // due = everything still owed on this visit's own money, so the customer
-      // can pay ahead if they want. Same-day add-ons are part of `short` but are
-      // recorded on the Billing tab, so report them separately for the UI.
-      const due = dueForVisit(appt, money);
-      const addon = unpaidAddonsThisVisit(appt);
-      const message = addon.amount > 0
-        ? `Collect ₹${short} before starting this session - ₹${addon.amount} is add-ons (${addon.addons.join(", ")}); record them in Billing.`
-        : `Collect ₹${short} before starting this session.`;
-      return res.status(402).send({ success: false, message, short, due, addonShort: addon.amount, addons: addon.addons });
-    }
+    // Payment is NOT checked here any more. A therapist can start the session
+    // as soon as the customer's OTP verifies. The visit's payment is enforced at
+    // completion instead - see completeSession -> unpaidBeforeComplete (402).
 
     // Use up one of the code's attempts atomically before checking it, so
     // parallel guesses can't get past the limit.

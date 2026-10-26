@@ -167,10 +167,10 @@ export function dueForVisit(visitRow: any, moneyRow: any): number {
 }
 
 /**
- * What must still be collected before this visit can be completed. The start
- * gate already demands same-day add-ons, so this is the end-of-visit safety net
- * for an add-on confirmed after the session had already begun. Zero means it
- * can be completed.
+ * What must still be collected before this visit can be completed. This is now
+ * the single payment gate in the visit flow: the OTP start step no longer
+ * checks money, so everything owed on the visit (its own share plus any
+ * same-visit add-ons) is enforced here instead. Zero means it can be completed.
  */
 export function unpaidBeforeComplete(visitRow: any, moneyRow: any): { amount: number; addons: string[] } {
   return { amount: shortBeforeStart(visitRow, moneyRow), addons: unpaidAddonsThisVisit(visitRow).addons };
