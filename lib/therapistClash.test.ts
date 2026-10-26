@@ -105,10 +105,24 @@ describe("bookingTimeProblem: the day ends at 8:30 PM (B2 #7)", () => {
   });
 
   it("from 8:30 PM, today can't be booked; tomorrow can", () => {
-    expect(bookingTimeProblem("2026-10-16", "18:30", "19:30", at("20:29"))).toBeNull();
+    // A still-future time today, before close, is bookable.
+    expect(bookingTimeProblem("2026-10-16", "18:30", "19:30", at("18:00"))).toBeNull();
+    // Once it's 8:30 PM, nothing more can be booked for today.
     expect(bookingTimeProblem("2026-10-16", "18:30", "19:30", at("20:30"))).toBe(
       "Bookings for today closed at 8:30 PM - pick tomorrow or later.",
     );
     expect(bookingTimeProblem("2026-10-17", "09:30", "10:30", at("22:00"))).toBeNull();
+  });
+
+  it("a start time already gone today can't be booked", () => {
+    // It's 6 PM, so a noon visit today is refused; the evening slot is fine.
+    expect(bookingTimeProblem("2026-10-16", "12:00", "13:00", at("18:00"))).toBe(
+      "12:00 has already passed today - pick a later time.",
+    );
+    // Touching "now" counts as gone.
+    expect(bookingTimeProblem("2026-10-16", "18:00", "19:00", at("18:00"))).toBe(
+      "18:00 has already passed today - pick a later time.",
+    );
+    expect(bookingTimeProblem("2026-10-16", "18:30", "19:30", at("18:00"))).toBeNull();
   });
 });
