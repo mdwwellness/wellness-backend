@@ -130,8 +130,9 @@ function clock(min: number): string {
 
 /**
  * Why a visit can't be given this time, or null when it can: it would end
- * after 8:30 PM, or it's for today and today's bookings have closed (8:30 PM).
- * A full sentence, shared by every path that gives a visit a time.
+ * after 8:30 PM, or it's for today and today's bookings have closed (8:30 PM)
+ * or the start time has already gone. A full sentence, shared by every path
+ * that gives a visit a time.
  */
 export function bookingTimeProblem(
   date: string | Date,
@@ -149,8 +150,15 @@ export function bookingTimeProblem(
   const day = typeof date === "string" ? date.slice(0, 10) : new Date(date).toISOString().slice(0, 10);
   const india = new Date(now + IST_OFFSET_MS);
   const nowMin = india.getUTCHours() * 60 + india.getUTCMinutes();
-  if (day === todayInIndia(now) && nowMin >= LAST_END_MIN) {
-    return "Bookings for today closed at 8:30 PM - pick tomorrow or later.";
+  if (day === todayInIndia(now)) {
+    if (nowMin >= LAST_END_MIN) {
+      return "Bookings for today closed at 8:30 PM - pick tomorrow or later.";
+    }
+    // A start time that has already gone today can't be booked. Mirrors the
+    // dashboard's checkConflict "past" - KEEP IN SYNC.
+    if (startMin <= nowMin) {
+      return `${start} has already passed today - pick a later time.`;
+    }
   }
   return null;
 }
