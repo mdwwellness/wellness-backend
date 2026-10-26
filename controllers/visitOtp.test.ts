@@ -60,17 +60,16 @@ describe("verifyVisitOtp", () => {
     expect(appt.visitOtpVerifiedAt).toBeInstanceOf(Date);
   });
 
-  it("won't start a visit until today's session is paid for", async () => {
+  it("starts the session even when today's visit is unpaid - payment is checked at completion now", async () => {
     appt.quotedPrice = 1600;
     appt.paymentAmount = 600;
     const r = res();
     await verifyVisitOtp(req("1234"), r);
-    expect(r.status).toHaveBeenCalledWith(402);
-    expect((r.send as any).mock.calls[0][0]).toMatchObject({ short: 1000, due: 1000 });
-    expect(mockFindOneAndUpdate).not.toHaveBeenCalled(); // no attempt used up
+    expect(r.status).toHaveBeenCalledWith(200);
+    expect(appt.visitOtpVerified).toBe(true);
   });
 
-  it("won't start when a same-day add-on is unpaid, even though the session is paid", async () => {
+  it("starts even when a same-day add-on is unpaid - the OTP, not money, gates the start", async () => {
     appt.quotedPrice = 1600;
     appt.paymentAmount = 1600; // session's own share fully settled
     appt.recommendedServices = [
@@ -78,11 +77,8 @@ describe("verifyVisitOtp", () => {
     ];
     const r = res();
     await verifyVisitOtp(req("1234"), r);
-    expect(r.status).toHaveBeenCalledWith(402);
-    // short counts the add-on, due (the booking's own money) is 0, and the
-    // add-on is reported separately so the UI can point at Billing.
-    expect((r.send as any).mock.calls[0][0]).toMatchObject({ short: 500, due: 0, addonShort: 500, addons: ["Accupunture"] });
-    expect(mockFindOneAndUpdate).not.toHaveBeenCalled(); // no attempt used up
+    expect(r.status).toHaveBeenCalledWith(200);
+    expect(appt.visitOtpVerified).toBe(true);
   });
 
   it("refuses a therapist the visit isn't assigned to", async () => {
@@ -152,5 +148,15 @@ describe("completeSession: the work is recorded first", () => {
     await completeSession(done({ note: "Lower back, dry needling" }), r);
     // Past the work check: whatever it hits next, it isn't this refusal.
     expect((r.send as any).mock.calls[0]?.[0]?.message).not.toBe("Tick Service performed and write the session note first.");
+  });
+
+  it("refuses to complete until this visit's payment is collected (moved here from the start)", async () => {
+    appt.quotedPrice = 1600;
+    appt.paymentAmount = 600; // ₹1,000 still owed on this visit
+    const r = res();
+    await completeSession(done({ performed: true, note: "Lower back, dry needling" }), r);
+    expect(r.status).toHaveBeenCalledWith(402);
+    expect((r.send as any).mock.calls[0][0]).toMatchObject({ short: 1000 });
+    expect((r.send as any).mock.calls[0][0].message).toMatch(/before completing this visit/);
   });
 });
