@@ -121,6 +121,15 @@ describe("createBooking: repeat folding", () => {
   });
 });
 
+describe("createBooking: customer link", () => {
+  it("ignores a client-sent customer_id, so the server links it and fills known details", async () => {
+    await createBooking(request({ customer_id: "CUST-0098" }));
+
+    expect(m.created[0].customer_id).toBeUndefined();
+    expect(m.ensureCustomer).toHaveBeenCalledWith(m.created[0]);
+  });
+});
+
 describe("course schedule: so many sessions a week", () => {
   // Offsets in days from session 1, for the first 8 sessions.
   const offsets = (perWeek: number) =>

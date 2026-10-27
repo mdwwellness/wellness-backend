@@ -120,8 +120,9 @@ export async function ensureCustomerForAppointment(
 
   // Backfill the customer ID onto the appointment doc so every appointment
   // carries its own customer_id (visible in the dashboard without a phone join).
-  // On that first link the booking also takes the gender and age the customer
-  // already has, so a returning customer's details show on the new lead.
+  // On that first link the booking also takes what the customer already has
+  // (gender, age, email, address) for anything it left blank, so a returning
+  // customer's details show on the new lead without being typed again.
   // Only when passed a live document - manual invoices pass plain objects.
   try {
     if (
@@ -132,6 +133,8 @@ export async function ensureCustomerForAppointment(
       appointment.customer_id = customer.customer_id;
       if (!appointment.gender && customer.gender) appointment.gender = customer.gender;
       if (!appointment.age) appointment.age = customerAge(customer);
+      if (!appointment.email && customer.email) appointment.email = customer.email;
+      if (!appointment.location && customer.address) appointment.location = customer.address;
       await appointment.save();
     }
   } catch {

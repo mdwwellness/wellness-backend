@@ -369,6 +369,10 @@ export async function createBooking(
     // totalSessions captures the original count; sessionNumber is the moving pointer.
     sessionNumber: 1,
     status: input.status || "enquiry",
+    // The server links the customer (ensureCustomerForAppointment, by phone +
+    // name). A client-sent id made the booking look already linked, which
+    // skipped copying the customer's known details onto it.
+    customer_id: undefined,
     // After ...input on purpose, so a client-sent referredByName can't stick.
     ...sourceFields,
     // Locked in by the server when the booking completes, never client-sent.
@@ -417,7 +421,8 @@ export async function createBooking(
           doctor: input.doctor,
           doctorId: input.doctorId,
           service: input.service,
-          location: input.location,
+          // Session 1's, which may have been filled in from the customer record.
+          location: appointment.location,
           typeOfappointment: input.typeOfappointment,
           bookingKind: "course",
           packageServiceId: input.packageServiceId,

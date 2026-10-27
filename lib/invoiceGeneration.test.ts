@@ -120,4 +120,16 @@ describe("ensureCustomerForAppointment", () => {
     });
     expect(booking.save).toHaveBeenCalled();
   });
+
+  it("a new booking also takes the customer's email and address, but never overwrites typed ones", async () => {
+    await ensureCustomerForAppointment({ ...ASHA, email: "asha@x.com", location: "12 Lake Rd" });
+    const blank: any = { ...ASHA, save: vi.fn() };
+    const typed: any = { ...ASHA, email: "new@x.com", location: "Office", save: vi.fn() };
+
+    await ensureCustomerForAppointment(blank);
+    await ensureCustomerForAppointment(typed);
+
+    expect(blank).toMatchObject({ email: "asha@x.com", location: "12 Lake Rd" });
+    expect(typed).toMatchObject({ email: "new@x.com", location: "Office" });
+  });
 });
