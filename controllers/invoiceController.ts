@@ -2,7 +2,8 @@ import type { Request, Response } from "express";
 import Invoice from "../models/invoiceModel.ts";
 import Customer from "../models/customerModel.ts";
 import { createInvoiceIfMissingForAppointment, createManualInvoice } from "../lib/invoiceGeneration.ts";
-import { ensureInvoicePdfGeneratedAndUploaded } from "../lib/invoicePdf.ts";
+import { renderInvoicePdf } from "../lib/invoicePdf.ts";
+import { invoiceView } from "../lib/invoiceView.ts";
 import { logger } from "../lib/logger.ts";
 
 const BACK_OFFICE_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "STAFF", "CUSTOMER_CARE"]);
@@ -117,8 +118,6 @@ export async function updateInvoice(req: Request, res: Response) {
     // "paid in full", not a negative number.
     invoice.balance_due = Math.max(0, invoice.total - (invoice.advance_paid ?? 0));
 
-    // Invalidate PDF after edits.
-    invoice.pdf_url = null;
     invoice.last_edited_by = actorName(req);
     invoice.last_edited_at = new Date();
 
@@ -197,6 +196,11 @@ export async function createInvoice(req: Request, res: Response) {
   }
 }
 
+/**
+ * The invoice as a PDF, built fresh from the live invoice and booking on every
+ * request and sent straight back: nothing is uploaded or stored, so there is no
+ * public link to it.
+ */
 export async function generateInvoicePdf(req: Request, res: Response) {
   try {
     const role = (req.user as any)?.role as string | undefined;
@@ -204,24 +208,14 @@ export async function generateInvoicePdf(req: Request, res: Response) {
       return res.status(403).send({ success: false, message: "Forbidden" });
     }
 
-    const { invoiceId } = req.params;
-    const regenerate = req.query.regenerate === "true";
-    const invoice = await Invoice.findOne({ invoice_id: invoiceId }).exec();
+    const invoice = await Invoice.findOne({ invoice_id: req.params.invoiceId }).exec();
     if (!invoice) return res.status(404).send({ success: false, message: "Invoice not found" });
 
-    if (invoice.pdf_url && !regenerate) {
-      return res.status(200).send({
-        success: true,
-        message: "Invoice PDF already generated",
-        data: { pdf_url: invoice.pdf_url },
-      });
-    }
-
-    const pdf_url = await ensureInvoicePdfGeneratedAndUploaded(invoice);
-    invoice.pdf_url = pdf_url;
-    await invoice.save();
-
-    return res.status(200).send({ success: true, message: "Invoice PDF generated", data: { pdf_url } });
+    const pdf = await renderInvoicePdf(await invoiceView(invoice));
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${invoice.invoice_id}.pdf"`);
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).send(pdf);
   } catch (err: any) {
     logger.error(`generateInvoicePdf failed for ${req.params.invoiceId}`, err);
     return res.status(500).send({ success: false, message: err.message });

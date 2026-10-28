@@ -40,7 +40,6 @@ vi.mock("./counters.ts", () => ({
   nextSequence: async () => ++m.seq,
   nextYearlySequence: async () => ++m.seq,
 }));
-vi.mock("./invoicePdf.ts", () => ({ ensureInvoicePdfGeneratedAndUploaded: vi.fn() }));
 vi.mock("./logger.ts", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 import { ensureCustomerForAppointment } from "./invoiceGeneration.ts";

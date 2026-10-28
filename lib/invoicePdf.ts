@@ -1,10 +1,48 @@
+// The invoice PDF: one layout for online consultations, home visits and
+// packages. Only the meeting/address box and the rows differ. It draws a ready
+// InvoiceView, so there are no lookups or money rules in here, just layout.
 import PDFDocument from "pdfkit";
-import Invoice from "../models/invoiceModel.ts";
-import { uploadBuffer } from "./uploadthing.ts";
+import path from "path";
+import { fileURLToPath } from "url";
 import { drawMdwLogo } from "./mdwLogo.ts";
 import { paidAtLabel } from "./sessionDates.ts";
 
-type InvoiceDoc = InstanceType<typeof Invoice>;
+export type InvoiceRow = {
+  service: string;
+  /** When it's done, shown under the service. */
+  when?: string;
+  pay: "paid" | "part" | "due";
+  /** How it was paid: "UPI", "UPI + Cash". */
+  method?: string;
+  therapistId?: string;
+  therapistName?: string;
+  /** Not done yet: no therapist is named until someone has actually done it. */
+  upcoming?: boolean;
+  unit: number;
+  /** Unit price before the discount, when there was one. */
+  unitMrp?: number;
+  qty: number;
+};
+
+export type InvoiceView = {
+  invoiceId: string;
+  bookingId: string;
+  date: string;
+  time: string;
+  billedBy: string;
+  /** "Dr. Sattwik (THR-0004)" */
+  therapist?: string;
+  customer: { name: string; id: string; phone: string; age?: string };
+  gst: string;
+  /** "Physiotherapy, 4 sessions" on a package. */
+  packageLabel?: string;
+  /** Home visit and package. */
+  address?: string;
+  /** Online consultation. */
+  meeting?: { date?: string; time?: string; link?: string };
+  rows: InvoiceRow[];
+  totals: { mrp: number; discount: number; payable: number; paid: number; due: number };
+};
 
 const BRAND = {
   name: "MDW Wellness",
@@ -15,584 +53,397 @@ const BRAND = {
   legalName: "My Dawai Wala Healthcare Services",
 };
 
-// Wellness palette - sourced from the client site's --mdw-blue brand token.
-const COLORS = {
+const C = {
   primary: "#018bc4",
   primaryDark: "#016a97",
   text: "#0f3057",
   muted: "#5a6b7c",
-  light: "#e6f4fb",
+  faint: "#8a99a8",
+  head: "#e6f4fb",
   panel: "#f4f9fc",
-  rowAlt: "#f7fbfd",
-  border: "#e2e8f0",
-  white: "#ffffff",
-  // Still to pay: a light yellow row, dark amber text.
+  border: "#dfe7ee",
+  paid: "#047857",
   due: "#fff4cc",
   dueText: "#92400e",
 };
 
-const INVOICE_TYPE_LABELS: Record<string, string> = {
-  online_consultation: "Online Consultation",
-  therapy_session: "Therapy Session",
-  package_purchase: "Package Purchase",
-  therapy_addon_standalone: "Therapy Add-on",
-  vitals_subscription: "Vitals Subscription",
+const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "assets", "fonts");
+const R = "Inter";
+const S = "Inter-SemiBold";
+
+const PAGE = { w: 595.28, h: 841.89, m: 40 };
+const W = PAGE.w - PAGE.m * 2;
+const FOOTER_TOP = PAGE.h - PAGE.m - 58;
+// Content stops here so it never runs into the footer.
+const BOTTOM = FOOTER_TOP - 14;
+
+type Doc = PDFKit.PDFDocument;
+type TextOpts = {
+  font?: string;
+  size?: number;
+  color?: string;
+  width?: number;
+  align?: "left" | "center" | "right";
+  strike?: boolean;
+  link?: string;
+  spacing?: number;
+  /** Figures of equal width, so amounts line up in a column. */
+  tnum?: boolean;
 };
 
-const PAYMENT_LABELS: Record<string, string> = {
-  paid: "Paid in full",
-  pending: "Payment pending",
-};
-
-const PAGE = { margin: 42, width: 595.28, height: 841.89 };
-
-function contentWidth(): number {
-  return PAGE.width - PAGE.margin * 2;
+function text(doc: Doc, s: string, x: number, y: number, o: TextOpts = {}) {
+  doc
+    .font(o.font ?? R)
+    .fontSize(o.size ?? 9)
+    .fillColor(o.color ?? C.text)
+    .text(s, x, y, {
+      width: o.width,
+      align: o.align,
+      strike: o.strike,
+      link: o.link,
+      characterSpacing: o.spacing,
+      features: o.tnum ? ["tnum"] : undefined,
+      lineBreak: o.width != null,
+    });
 }
 
-function bufferFromPdfDocument(doc: PDFKit.PDFDocument): Promise<Buffer> {
+function height(doc: Doc, s: string, width: number, font = R, size = 9): number {
+  return doc.font(font).fontSize(size).heightOfString(s, { width });
+}
+
+const money = (n: number) =>
+  `₹${(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function rule(doc: Doc, y: number, color = C.border, x = PAGE.m, w = W) {
+  doc.moveTo(x, y).lineTo(x + w, y).lineWidth(0.75).strokeColor(color).stroke();
+}
+
+function header(doc: Doc, v: InvoiceView): number {
+  doc.rect(PAGE.m, PAGE.m, W, 3).fill(C.primary);
+  const y = PAGE.m + 18;
+  drawMdwLogo(doc, PAGE.m, y + 1, 76);
+  text(doc, BRAND.name, PAGE.m, y - 1, { font: S, size: 17, width: W, align: "center" });
+  text(doc, BRAND.tagline, PAGE.m, y + 22, { size: 8.5, color: C.muted, width: W, align: "center" });
+  const mw = 170;
+  const mx = PAGE.m + W - mw;
+  text(doc, "INVOICE", mx, y, { font: S, size: 7, color: C.faint, width: mw, align: "right", spacing: 1.2 });
+  text(doc, v.invoiceId, mx, y + 10, { font: S, size: 12, color: C.primaryDark, width: mw, align: "right" });
+  text(doc, `Generated ${paidAtLabel(new Date())}`, mx, y + 28, { size: 7.5, color: C.muted, width: mw, align: "right" });
+  const line = y + 48;
+  rule(doc, line);
+  return line + 18;
+}
+
+/** Continuation pages: which invoice this is, then straight into content. */
+function continuedHeader(doc: Doc, v: InvoiceView): number {
+  doc.rect(PAGE.m, PAGE.m, W, 3).fill(C.primary);
+  text(doc, `${v.invoiceId} (continued)`, PAGE.m, PAGE.m + 12, { size: 8, color: C.muted, width: W });
+  return PAGE.m + 34;
+}
+
+function heading(doc: Doc, title: string, x: number, y: number): number {
+  text(doc, title, x, y, { font: S, size: 9.5, color: C.primary });
+  const w = doc.widthOfString(title);
+  doc.moveTo(x, y + 15).lineTo(x + w, y + 15).lineWidth(1).strokeColor(C.primary).stroke();
+  return y + 23;
+}
+
+const LABEL_W = 78;
+type Pair = [label: string, value: string | undefined, opts?: { link?: string; color?: string }];
+
+/** Label / value rows with the values lined up in one column. */
+function pairs(doc: Doc, rows: Pair[], x: number, y: number, width: number): number {
+  const vw = width - LABEL_W;
+  for (const [label, value, o] of rows) {
+    if (!value) continue;
+    text(doc, label, x, y, { color: C.muted, width: LABEL_W - 6 });
+    text(doc, value, x + LABEL_W, y, { color: o?.color ?? (o?.link ? C.primary : C.text), width: vw, link: o?.link });
+    y += Math.max(height(doc, value, vw), height(doc, label, LABEL_W - 6)) + 4.5;
+  }
+  return y;
+}
+
+const GAP = 32;
+const COL_W = (W - GAP) / 2;
+const LEFT = PAGE.m;
+const RIGHT = PAGE.m + COL_W + GAP;
+
+function infoBlocks(doc: Doc, v: InvoiceView, y: number): number {
+  const l1 = pairs(
+    doc,
+    [
+      ["Booking ID", v.bookingId],
+      ["Date", v.date],
+      ["Time", v.time],
+      ["Billed by", v.billedBy],
+      ["Assigned to", v.therapist],
+    ],
+    LEFT,
+    heading(doc, "Booking Information", LEFT, y),
+    COL_W,
+  );
+  const r1 = pairs(
+    doc,
+    [
+      ["Name", v.customer.name],
+      ["Customer ID", v.customer.id],
+      ["Phone", v.customer.phone],
+      ["Age", v.customer.age],
+    ],
+    RIGHT,
+    heading(doc, "Customer Information", RIGHT, y),
+    COL_W,
+  );
+  y = Math.max(l1, r1) + 14;
+
+  const l2 = pairs(
+    doc,
+    [
+      ["GST Number", v.gst],
+      ["Package", v.packageLabel],
+    ],
+    LEFT,
+    heading(doc, "Billing Information", LEFT, y),
+    COL_W,
+  );
+  let r2: number;
+  if (v.meeting) {
+    const m = v.meeting;
+    r2 = pairs(
+      doc,
+      [
+        ["Date", m.date],
+        ["Time", m.time],
+        m.link ? ["Meet link", m.link, { link: m.link }] : ["Meet link", "Shared before the meeting", { color: C.muted }],
+      ],
+      RIGHT,
+      heading(doc, "Online Meeting", RIGHT, y),
+      COL_W,
+    );
+  } else {
+    r2 = heading(doc, "Visit Address", RIGHT, y);
+    const address = v.address || "Not given";
+    text(doc, address, RIGHT, r2, { color: v.address ? C.text : C.muted, width: COL_W });
+    r2 += height(doc, address, COL_W) + 4.5;
+  }
+  return Math.max(l2, r2) + 16;
+}
+
+type Cell = {
+  main: string;
+  sub?: string;
+  color?: string;
+  /** The sub line is the price before the discount: "MRP" and the old price struck through. */
+  mrp?: boolean;
+  tnum?: boolean;
+  muted?: boolean;
+};
+// Unit price is wide enough for "MRP ₹12,000.00" at full size on one line.
+const COLS: { title: string; w: number; align?: "left" | "right" | "center" }[] = [
+  { title: "#", w: 22 },
+  { title: "Service", w: 0 },
+  { title: "Payment", w: 60 },
+  { title: "Therapist ID", w: 60 },
+  { title: "Therapist", w: 74 },
+  { title: "Unit price", w: 82, align: "right" },
+  { title: "Qty", w: 28, align: "center" },
+  { title: "Amount", w: 70, align: "right" },
+];
+COLS[1].w = W - COLS.reduce((t, c) => t + c.w, 0);
+const PAD_X = 6;
+const PAD_Y = 7;
+const MAIN = 8.5;
+const SUB = 7.5;
+
+const PAY_LABEL = { paid: "Paid", part: "Part paid", due: "Due" } as const;
+
+function cells(row: InvoiceRow, i: number): Cell[] {
+  return [
+    { main: String(i + 1), muted: true },
+    // A time never splits from its AM/PM when the line wraps.
+    { main: row.service, sub: row.when?.replace(/ (AM|PM)\b/g, "\u00a0$1") },
+    { main: PAY_LABEL[row.pay], sub: row.method, color: row.pay === "paid" ? C.paid : C.dueText },
+    { main: (!row.upcoming && row.therapistId) || "-", muted: row.upcoming || !row.therapistId },
+    {
+      main: row.upcoming ? "Upcoming" : row.therapistName || "-",
+      muted: row.upcoming || !row.therapistName,
+    },
+    {
+      main: money(row.unit),
+      sub: row.unitMrp != null && row.unitMrp > row.unit ? money(row.unitMrp) : undefined,
+      mrp: true,
+      tnum: true,
+    },
+    { main: String(row.qty), tnum: true },
+    { main: money(row.unit * row.qty), tnum: true },
+  ];
+}
+
+function cellHeight(doc: Doc, c: Cell, w: number): number {
+  const main = height(doc, c.main, w, R, MAIN);
+  return c.sub ? main + 2 + height(doc, c.sub, w, R, c.mrp ? MAIN : SUB) : main;
+}
+
+/** "MRP ~~₹1,600.00~~", right-aligned, same size as the price so it reads on paper. */
+function mrpLine(doc: Doc, amount: string, right: number, y: number) {
+  doc.font(R).fontSize(MAIN);
+  const amountW = doc.widthOfString(amount, { features: ["tnum"] });
+  const labelW = doc.widthOfString("MRP ");
+  text(doc, "MRP ", right - amountW - labelW, y, { size: MAIN, color: C.muted });
+  // pdfkit needs a box width to draw the strike; a little slack keeps it on one line.
+  text(doc, amount, right - amountW, y, { size: MAIN, color: C.muted, strike: true, tnum: true, width: amountW + 2 });
+}
+
+function tableHead(doc: Doc, y: number): number {
+  const h = 22;
+  doc.rect(PAGE.m, y, W, h).fill(C.head);
+  let x = PAGE.m;
+  for (const col of COLS) {
+    text(doc, col.title, x + PAD_X, y + 7, { font: S, size: 7.5, width: col.w - PAD_X * 2, align: col.align });
+    x += col.w;
+  }
+  return y + h;
+}
+
+function servicesTable(doc: Doc, v: InvoiceView, y: number): number {
+  y = heading(doc, "Services", PAGE.m, y) + 1;
+  let top = y;
+  y = tableHead(doc, y);
+  const frame = (bottom: number) => doc.rect(PAGE.m, top, W, bottom - top).lineWidth(0.75).strokeColor(C.border).stroke();
+
+  v.rows.forEach((row, i) => {
+    const cs = cells(row, i);
+    const h = Math.max(...cs.map((c, k) => cellHeight(doc, c, COLS[k].w - PAD_X * 2))) + PAD_Y * 2;
+    if (y + h > BOTTOM) {
+      frame(y);
+      doc.addPage();
+      top = continuedHeader(doc, v);
+      y = tableHead(doc, top);
+    }
+    if (row.pay !== "paid") doc.rect(PAGE.m, y, W, h).fill(C.due);
+    let x = PAGE.m;
+    cs.forEach((c, k) => {
+      const w = COLS[k].w - PAD_X * 2;
+      const align = COLS[k].align;
+      text(doc, c.main, x + PAD_X, y + PAD_Y, {
+        size: MAIN,
+        color: c.color ?? (c.muted ? C.muted : C.text),
+        width: w,
+        align,
+        tnum: c.tnum,
+      });
+      if (c.sub) {
+        const sy = y + PAD_Y + height(doc, c.main, w, R, MAIN) + 2;
+        if (c.mrp) mrpLine(doc, c.sub, x + PAD_X + w, sy);
+        else text(doc, c.sub, x + PAD_X, sy, { size: SUB, color: C.faint, width: w, align, tnum: c.tnum });
+      }
+      x += COLS[k].w;
+    });
+    y += h;
+    if (i < v.rows.length - 1) rule(doc, y);
+  });
+  frame(y);
+  return y + 18;
+}
+
+const TOTALS_W = 236;
+
+function totalsAndNotes(doc: Doc, v: InvoiceView, y: number): number {
+  const t = v.totals;
+  // MRP and discount only when there was a discount; otherwise MRP would just
+  // repeat the total.
+  const rows: { label: string; value: string; strong?: boolean; due?: boolean; lineAbove?: boolean }[] = [
+    ...(t.discount > 0
+      ? [
+          { label: "Total (MRP)", value: money(t.mrp) },
+          { label: "Discount", value: `- ${money(t.discount)}` },
+        ]
+      : []),
+    { label: "Total payable", value: money(t.payable), strong: true, lineAbove: t.discount > 0 },
+    { label: "Paid", value: money(t.paid) },
+    { label: "Amount due", value: money(t.due), strong: t.due > 0, due: t.due > 0 },
+  ];
+  const ROW_H = 20;
+  const PAD = 6;
+  const panelH = rows.length * ROW_H + PAD * 2;
+  if (y + panelH > BOTTOM) {
+    doc.addPage();
+    y = continuedHeader(doc, v);
+  }
+
+  const px = PAGE.m + W - TOTALS_W;
+  doc.rect(px, y, TOTALS_W, panelH).fill(C.panel);
+  let ry = y + PAD;
+  rows.forEach((r, i) => {
+    // The last row runs to the box's edge, so its yellow band leaves no gap.
+    const h = ROW_H + (i === rows.length - 1 ? PAD : 0);
+    if (r.lineAbove) rule(doc, ry, C.border, px + 12, TOTALS_W - 24);
+    if (r.due) doc.rect(px, ry, TOTALS_W, h).fill(C.due);
+    const color = r.due ? C.dueText : r.strong ? C.text : C.muted;
+    const font = r.strong ? S : R;
+    const size = r.strong ? 10 : 9;
+    const ty = ry + (h - size * 1.2) / 2;
+    text(doc, r.label, px + 14, ty, { font, size, color, width: 110 });
+    text(doc, r.value, px + 120, ty, { font, size, color: r.strong || r.due ? color : C.text, width: TOTALS_W - 134, align: "right", tnum: true });
+    ry += h;
+  });
+  doc.rect(px, y, TOTALS_W, panelH).lineWidth(0.75).strokeColor(C.border).stroke();
+
+  const nw = W - TOTALS_W - 28;
+  text(doc, "Notes", PAGE.m, y + 2, { font: S, size: 8.5, width: nw });
+  let ny = y + 18;
+  for (const note of [
+    "Please keep this receipt for future reference.",
+    "For inquiries, contact customer support within 2 days.",
+  ]) {
+    text(doc, `•  ${note}`, PAGE.m, ny, { size: 8, color: C.muted, width: nw });
+    ny += height(doc, `•  ${note}`, nw, R, 8) + 3;
+  }
+  return Math.max(ny, y + panelH);
+}
+
+function footer(doc: Doc, page: number, pages: number) {
+  // Drawing below the bottom margin would make pdfkit start a new page.
+  doc.page.margins.bottom = 0;
+  rule(doc, FOOTER_TOP);
+  text(doc, "Thank you for choosing MDW Wellness!", PAGE.m, FOOTER_TOP + 9, { font: S, size: 9.5, color: C.primary, width: W, align: "center" });
+  text(doc, `${BRAND.legalName}  |  ${BRAND.website}  |  ${BRAND.email}  |  ${BRAND.phone}`, PAGE.m, FOOTER_TOP + 25, {
+    size: 7.5,
+    color: C.muted,
+    width: W,
+    align: "center",
+  });
+  text(
+    doc,
+    "For further queries, please check our Return, Refund and Cancellation Policy. This is a computer-generated invoice and needs no signature.",
+    PAGE.m,
+    FOOTER_TOP + 37,
+    { size: 6.75, color: C.faint, width: W, align: "center" },
+  );
+  if (pages > 1) text(doc, `Page ${page} of ${pages}`, PAGE.m, FOOTER_TOP + 49, { size: 6.75, color: C.faint, width: W, align: "right" });
+}
+
+export function renderInvoicePdf(v: InvoiceView): Promise<Buffer> {
+  const doc = new PDFDocument({ size: "A4", margin: PAGE.m, bufferPages: true, info: { Title: `Invoice ${v.invoiceId}` } });
+  doc.registerFont(R, path.join(FONTS, "Inter-Regular.woff"));
+  doc.registerFont(S, path.join(FONTS, "Inter-SemiBold.woff"));
   const chunks: Buffer[] = [];
   doc.on("data", (d: Buffer) => chunks.push(d));
-
-  return new Promise((resolve, reject) => {
+  const done = new Promise<Buffer>((resolve, reject) => {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
   });
-}
 
-function formatINR(amount: number): string {
-  // pdfkit's built-in Helvetica has no rupee glyph (U+20B9) - it would render
-  // as a blank box - so use a plain "Rs." prefix that renders reliably.
-  const n = new Intl.NumberFormat("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount ?? 0);
-  return `Rs. ${n}`;
-}
+  let y = header(doc, v);
+  y = infoBlocks(doc, v, y);
+  y = servicesTable(doc, v, y);
+  totalsAndNotes(doc, v, y);
 
-function formatDate(d: Date): string {
-  return d.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function formatTime(d: Date): string {
-  return d.toLocaleTimeString("en-IN", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function formatDateTime(d: Date): string {
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function invoiceTypeLabel(type: string): string {
-  return INVOICE_TYPE_LABELS[type] ?? type.replace(/_/g, " ");
-}
-
-function readInvoiceDate(invoice: InvoiceDoc): Date {
-  const raw = (invoice as any).createdAt;
-  if (raw) {
-    const d = new Date(raw);
-    if (!Number.isNaN(d.getTime())) return d;
+  const { start, count } = doc.bufferedPageRange();
+  for (let i = start; i < start + count; i++) {
+    doc.switchToPage(i);
+    footer(doc, i - start + 1, count);
   }
-  return new Date();
-}
-
-/** Section title in brand blue with a short underline beneath the text. */
-function drawSectionHeading(
-  doc: PDFKit.PDFDocument,
-  title: string,
-  x: number,
-  y: number,
-  width: number,
-): number {
-  doc.save();
-  doc
-    .fillColor(COLORS.primary)
-    .font("Helvetica-Bold")
-    .fontSize(10.5)
-    .text(title, x, y, { width, lineBreak: false });
-  const tw = Math.min(doc.widthOfString(title), width);
-  const underlineY = y + 14;
-  doc
-    .moveTo(x, underlineY)
-    .lineTo(x + tw, underlineY)
-    .strokeColor(COLORS.primary)
-    .lineWidth(1.4)
-    .stroke();
-  doc.restore();
-  return underlineY + 9;
-}
-
-/** Inline "Label: value" row. Returns the next y. */
-function drawKeyValue(
-  doc: PDFKit.PDFDocument,
-  x: number,
-  y: number,
-  label: string,
-  value: string,
-  width: number,
-): number {
-  const labelText = `${label}: `;
-  doc.font("Helvetica").fontSize(10);
-  const lw = doc.widthOfString(labelText);
-  doc.fillColor(COLORS.muted).text(labelText, x, y, { lineBreak: false });
-  doc
-    .fillColor(COLORS.text)
-    .font("Helvetica-Bold")
-    .fontSize(10)
-    .text(value || "-", x + lw, y, { width: Math.max(20, width - lw), lineBreak: false });
-  return y + 16;
-}
-
-function drawHeader(doc: PDFKit.PDFDocument, invoice: InvoiceDoc): number {
-  const w = contentWidth();
-  const top = PAGE.margin;
-  const generatedAt = new Date();
-
-  doc.save();
-  doc.rect(PAGE.margin, top, w, 4).fill(COLORS.primary);
-  doc.restore();
-
-  const headerY = top + 18;
-
-  drawMdwLogo(doc, PAGE.margin, headerY + 1, 82);
-
-  doc
-    .fillColor(COLORS.text)
-    .font("Helvetica-Bold")
-    .fontSize(19)
-    .text(BRAND.name, PAGE.margin, headerY, { width: w, align: "center" });
-  doc
-    .fillColor(COLORS.muted)
-    .font("Helvetica")
-    .fontSize(9.5)
-    .text(BRAND.tagline, PAGE.margin, headerY + 24, { width: w, align: "center" });
-
-  const metaX = PAGE.margin + w - 190;
-  doc
-    .fillColor(COLORS.muted)
-    .font("Helvetica")
-    .fontSize(9)
-    .text("Invoice", metaX, headerY, { width: 190, align: "right" });
-  doc
-    .fillColor(COLORS.primaryDark)
-    .font("Helvetica-Bold")
-    .fontSize(13)
-    .text(invoice.invoice_id, metaX, headerY + 12, { width: 190, align: "right" });
-  doc
-    .fillColor(COLORS.muted)
-    .font("Helvetica")
-    .fontSize(8.5)
-    .text(`Generated: ${formatDateTime(generatedAt)}`, metaX, headerY + 30, {
-      width: 190,
-      align: "right",
-    });
-
-  const lineY = headerY + 54;
-  doc
-    .moveTo(PAGE.margin, lineY)
-    .lineTo(PAGE.margin + w, lineY)
-    .strokeColor(COLORS.border)
-    .lineWidth(1)
-    .stroke();
-
-  return lineY + 18;
-}
-
-function drawTwoColumnInfo(
-  doc: PDFKit.PDFDocument,
-  y: number,
-  leftTitle: string,
-  leftRows: [string, string][],
-  rightTitle: string,
-  rightRows: [string, string][],
-): number {
-  const w = contentWidth();
-  const gap = 24;
-  const colW = (w - gap) / 2;
-  const leftX = PAGE.margin;
-  const rightX = PAGE.margin + colW + gap;
-
-  let ly = drawSectionHeading(doc, leftTitle, leftX, y, colW);
-  for (const [k, v] of leftRows) ly = drawKeyValue(doc, leftX, ly, k, v, colW);
-
-  let ry = drawSectionHeading(doc, rightTitle, rightX, y, colW);
-  for (const [k, v] of rightRows) ry = drawKeyValue(doc, rightX, ry, k, v, colW);
-
-  return Math.max(ly, ry) + 12;
-}
-
-/** Service Details (left) + Service Location paragraph (right, when present). */
-function drawServiceSection(
-  doc: PDFKit.PDFDocument,
-  y: number,
-  serviceRows: [string, string][],
-  address: string,
-): number {
-  const w = contentWidth();
-  const gap = 24;
-  const colW = (w - gap) / 2;
-  const leftX = PAGE.margin;
-  const rightX = PAGE.margin + colW + gap;
-
-  let ly = drawSectionHeading(doc, "Service Details", leftX, y, colW);
-  for (const [k, v] of serviceRows) ly = drawKeyValue(doc, leftX, ly, k, v, colW);
-
-  let ry = y;
-  if (address) {
-    ry = drawSectionHeading(doc, "Service Location", rightX, y, colW);
-    doc
-      .font("Helvetica")
-      .fontSize(10)
-      .fillColor(COLORS.text)
-      .text(address, rightX, ry, { width: colW });
-    ry += doc.heightOfString(address, { width: colW });
-  }
-
-  return Math.max(ly, ry) + 12;
-}
-
-type PdfLine = { description: string; price: number; session?: string | null; paid?: number | null };
-
-/** "Paid", "Part paid", "Due", or "-" when the line carries no payment info. */
-function linePayment(item: PdfLine, invoicePaid: boolean): { text: string; due: boolean } {
-  if (item.paid == null) return { text: invoicePaid ? "Paid" : "-", due: false };
-  if (!(item.price > 0) || item.paid >= item.price) return { text: "Paid", due: false };
-  return { text: item.paid > 0 ? "Part paid" : "Due", due: true };
-}
-
-function drawServicesTable(
-  doc: PDFKit.PDFDocument,
-  y: number,
-  items: PdfLine[],
-  invoicePaid: boolean,
-): number {
-  const w = contentWidth();
-  y = drawSectionHeading(doc, "Services & Charges", PAGE.margin, y, w);
-  y += 2;
-
-  const colSno = 28;
-  const colSession = 150;
-  const colPay = 62;
-  const colAmt = 84;
-  const colDesc = w - colSno - colSession - colPay - colAmt;
-  const xDesc = PAGE.margin + colSno;
-  const xSession = xDesc + colDesc;
-  const xPay = xSession + colSession;
-  const xAmt = xPay + colPay;
-  const headerH = 24;
-
-  doc.save();
-  doc.rect(PAGE.margin, y, w, headerH).fill(COLORS.light);
-  doc
-    .fillColor(COLORS.text)
-    .font("Helvetica-Bold")
-    .fontSize(9.5)
-    .text("#", PAGE.margin + 8, y + 8, { width: colSno - 8 })
-    .text("Service", xDesc + 4, y + 8, { width: colDesc - 8 })
-    .text("Session date", xSession + 4, y + 8, { width: colSession - 8 })
-    .text("Payment", xPay + 4, y + 8, { width: colPay - 8 })
-    .text("Amount", xAmt, y + 8, { width: colAmt - 10, align: "right" });
-  doc.restore();
-
-  let rowY = y + headerH;
-  items.forEach((item, idx) => {
-    const session = item.session || "-";
-    const pay = linePayment(item, invoicePaid);
-    doc.font("Helvetica").fontSize(9.5);
-    const rowH = Math.max(
-      26,
-      doc.heightOfString(item.description, { width: colDesc - 8 }) + 14,
-      doc.heightOfString(session, { width: colSession - 8 }) + 14,
-    );
-
-    if (pay.due || idx % 2 === 1) {
-      doc.save();
-      doc.rect(PAGE.margin, rowY, w, rowH).fill(pay.due ? COLORS.due : COLORS.rowAlt);
-      doc.restore();
-    }
-    doc
-      .fillColor(COLORS.primary)
-      .font("Helvetica-Bold")
-      .fontSize(9.5)
-      .text(String(idx + 1), PAGE.margin + 8, rowY + 8, { width: colSno - 8 });
-    doc
-      .fillColor(COLORS.text)
-      .font("Helvetica")
-      .fontSize(9.5)
-      .text(item.description, xDesc + 4, rowY + 8, { width: colDesc - 8 })
-      .text(session, xSession + 4, rowY + 8, { width: colSession - 8 });
-    doc
-      .fillColor(pay.due ? COLORS.dueText : COLORS.text)
-      .font(pay.due ? "Helvetica-Bold" : "Helvetica")
-      .fontSize(9.5)
-      .text(pay.text, xPay + 4, rowY + 8, { width: colPay - 8 });
-    doc
-      .fillColor(COLORS.text)
-      .font("Helvetica-Bold")
-      .fontSize(9.5)
-      .text(formatINR(item.price), xAmt, rowY + 8, { width: colAmt - 10, align: "right" });
-    rowY += rowH;
-  });
-
-  doc
-    .rect(PAGE.margin, y, w, rowY - y)
-    .strokeColor(COLORS.border)
-    .lineWidth(1)
-    .stroke();
-
-  return rowY + 16;
-}
-
-/** "UPI", "Cash", "Card"... for a stored payment method. */
-function methodLabel(m: string): string {
-  if (!m) return "";
-  return m.toLowerCase() === "upi" ? "UPI" : m[0].toUpperCase() + m.slice(1);
-}
-
-function drawPaymentAndTotals(
-  doc: PDFKit.PDFDocument,
-  y: number,
-  invoice: InvoiceDoc,
-): number {
-  const w = contentWidth();
-  const panelW = 250;
-  const gap = 16;
-  const leftW = w - panelW - gap;
-  const leftX = PAGE.margin;
-  const panelX = PAGE.margin + w - panelW;
-
-  // Left: payment status + notes.
-  const afterHead = drawSectionHeading(doc, "Payment Information", leftX, y, leftW);
-  // Stored status is only paid/pending; money already in reads "Part paid"
-  // (same as the dashboard's invoiceStatusLabel).
-  const paymentLabel =
-    invoice.payment_status !== "paid" && Number(invoice.advance_paid) > 0
-      ? "Part paid"
-      : (PAYMENT_LABELS[invoice.payment_status] ?? invoice.payment_status);
-  doc
-    .fillColor(invoice.payment_status === "paid" ? COLORS.primaryDark : COLORS.text)
-    .font("Helvetica-Bold")
-    .fontSize(11)
-    .text(paymentLabel, leftX, afterHead + 2);
-
-  // Payments received, one per line, amount right-aligned.
-  const payments = ((invoice as any).payments ?? []) as { at: Date; method?: string; amount: number; for?: string }[];
-  doc
-    .fillColor(COLORS.text)
-    .font("Helvetica-Bold")
-    .fontSize(9.5)
-    .text("Payments received", leftX, afterHead + 22);
-  let payY = afterHead + 36;
-  if (!payments.length) {
-    doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text("None yet", leftX + 6, payY);
-    payY += 14;
-  }
-  for (const p of payments) {
-    const what = [paidAtLabel(p.at), methodLabel(p.method ?? ""), p.for ? `for ${p.for}` : ""]
-      .filter(Boolean)
-      .join(" · ");
-    // A long one wraps under itself; the next starts below it.
-    const whatW = leftW - 96;
-    doc
-      .fillColor(COLORS.muted)
-      .font("Helvetica")
-      .fontSize(9)
-      .text(what, leftX + 6, payY, { width: whatW });
-    const whatH = doc.heightOfString(what, { width: whatW });
-    doc
-      .fillColor(COLORS.text)
-      .font("Helvetica-Bold")
-      .fontSize(9)
-      .text(formatINR(p.amount), leftX + leftW - 90, payY, { width: 90, align: "right" });
-    payY += Math.max(14, whatH + 4);
-  }
-
-  doc
-    .fillColor(COLORS.muted)
-    .font("Helvetica")
-    .fontSize(9)
-    .text("Notes:", leftX, payY + 10);
-
-  const notes = [
-    "Please keep this invoice for your records and insurance claims.",
-    "For billing queries, contact our customer support within 7 days.",
-    "Session packages are non-refundable once activated unless stated otherwise.",
-  ];
-  let noteY = payY + 24;
-  for (const note of notes) {
-    doc
-      .fillColor(COLORS.muted)
-      .font("Helvetica")
-      .fontSize(9)
-      .text(`• ${note}`, leftX + 6, noteY, { width: leftW - 12 });
-    noteY = doc.y + 3;
-  }
-
-  // Right: totals, one per line, amounts right-aligned. What's still to pay is
-  // in yellow.
-  const due = Number(invoice.balance_due) || 0;
-  const rows: { label: string; value: string; strong?: boolean; due?: boolean }[] = [
-    { label: "Total", value: formatINR(invoice.total) },
-    { label: "Paid", value: formatINR(invoice.advance_paid) },
-    { label: "Amount due", value: formatINR(due), strong: true, due: due > 0 },
-  ];
-  const rowH = 22;
-  const panelH = rows.length * rowH + 4;
-  doc.save();
-  doc.rect(panelX, y, panelW, panelH).fill(COLORS.panel);
-  doc
-    .rect(panelX, y, panelW, panelH)
-    .strokeColor(COLORS.border)
-    .lineWidth(1)
-    .stroke();
-  let ry = y + 8;
-  for (const row of rows) {
-    if (row.due) {
-      doc.rect(panelX + 1, ry - 6, panelW - 2, rowH).fill(COLORS.due);
-    }
-    const color = row.due ? COLORS.dueText : row.strong ? COLORS.primary : COLORS.text;
-    doc
-      .fillColor(row.strong ? color : COLORS.muted)
-      .font(row.strong ? "Helvetica-Bold" : "Helvetica")
-      .fontSize(row.strong ? 11 : 10)
-      .text(row.label, panelX + 14, ry, { width: 120 });
-    doc
-      .fillColor(color)
-      .font(row.strong ? "Helvetica-Bold" : "Helvetica")
-      .fontSize(row.strong ? 11 : 10)
-      .text(row.value, panelX + 120, ry, { width: panelW - 134, align: "right" });
-    ry += rowH;
-  }
-  doc.restore();
-
-  return Math.max(noteY, y + panelH) + 14;
-}
-
-function drawFooter(doc: PDFKit.PDFDocument) {
-  const w = contentWidth();
-  const footerY = PAGE.height - PAGE.margin - 52;
-
-  doc
-    .moveTo(PAGE.margin, footerY)
-    .lineTo(PAGE.margin + w, footerY)
-    .strokeColor(COLORS.border)
-    .lineWidth(1)
-    .stroke();
-
-  doc
-    .fillColor(COLORS.primary)
-    .font("Helvetica-Bold")
-    .fontSize(11)
-    .text("Thank you for choosing MDW Wellness!", PAGE.margin, footerY + 12, {
-      width: w,
-      align: "center",
-    });
-
-  const footerLine = `${BRAND.legalName}  |  ${BRAND.website}  |  ${BRAND.email}  |  ${BRAND.phone}`;
-  doc
-    .fillColor(COLORS.muted)
-    .font("Helvetica")
-    .fontSize(8)
-    .text(footerLine, PAGE.margin, footerY + 30, { width: w, align: "center" });
-
-  doc
-    .fillColor(COLORS.muted)
-    .font("Helvetica")
-    .fontSize(7.5)
-    .text(
-      "This is a computer-generated invoice and does not require a physical signature.",
-      PAGE.margin,
-      footerY + 42,
-      { width: w, align: "center" },
-    );
-}
-
-function buildInvoicePdf(invoice: InvoiceDoc): PDFKit.PDFDocument {
-  const doc = new PDFDocument({ size: "A4", margin: PAGE.margin });
-  const invoiceDate = readInvoiceDate(invoice);
-
-  let y = drawHeader(doc, invoice);
-
-  const leftRows: [string, string][] = [
-    ["Invoice ID", invoice.invoice_id],
-    ["Booking ID", (invoice as any).enquiry_id ?? ""],
-    ["Date", formatDate(invoiceDate)],
-    ["Time", formatTime(invoiceDate)],
-    ["Billed by", invoice.created_by || "MDW Admin"],
-  ];
-  const rightRows: [string, string][] = [
-    ["Name", invoice.customer_name],
-    ["Phone", String(invoice.customer_phone)],
-    ["Customer ID", invoice.customer_id],
-  ];
-  y = drawTwoColumnInfo(
-    doc,
-    y,
-    "Invoice Information",
-    leftRows,
-    "Customer Information",
-    rightRows,
-  );
-
-  const serviceRows: [string, string][] = [];
-  if (invoice.therapist_name)
-    serviceRows.push(["Therapist", invoice.therapist_name]);
-  if ((invoice as any).therapist_id)
-    serviceRows.push(["Therapist ID", (invoice as any).therapist_id]);
-  if (invoice.package_name) serviceRows.push(["Package", invoice.package_name]);
-  if (invoice.session_number)
-    serviceRows.push(["Session", String(invoice.session_number)]);
-
-  const address = ((invoice as any).address ?? "").toString().trim();
-  y = drawServiceSection(doc, y, serviceRows, address);
-
-  const items =
-    invoice.line_items?.length > 0
-      ? invoice.line_items
-      : [
-          {
-            description: invoiceTypeLabel(invoice.invoice_type),
-            price: invoice.total,
-          },
-        ];
-  y = drawServicesTable(doc, y, items as PdfLine[], invoice.payment_status === "paid");
-
-  drawPaymentAndTotals(doc, y, invoice);
-
-  drawFooter(doc);
-
-  return doc;
-}
-
-export async function ensureInvoicePdfGeneratedAndUploaded(
-  invoice: InvoiceDoc,
-): Promise<string> {
-  const filename = `${invoice.invoice_id}-${Date.now()}.pdf`;
-  const doc = buildInvoicePdf(invoice);
-  const pdfPromise = bufferFromPdfDocument(doc);
   doc.end();
-  const pdfBuffer = await pdfPromise;
-
-  return uploadBuffer({
-    buffer: pdfBuffer,
-    filename,
-    type: "application/pdf",
-  });
+  return done;
 }

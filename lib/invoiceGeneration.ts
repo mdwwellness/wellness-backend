@@ -566,7 +566,6 @@ async function createInvoiceFromAppointment(args: {
       balance_due,
       total,
       payment_status,
-      pdf_url: null,
       created_by: createdBy,
       last_edited_by: null,
       last_edited_at: null,
@@ -694,21 +693,6 @@ export async function syncInvoiceFromAppointment(args: {
   existing.last_edited_by = editor;
   existing.last_edited_at = new Date();
 
-  // When something the PDF shows has changed, mark the PDF out of date instead
-  // of re-rendering and uploading it here: that ran on every booking save and
-  // added seconds to it. It's rebuilt on demand (Generate PDF ->
-  // generateInvoicePdf), the same as after a manual invoice edit.
-  const pdfVisibleChanged =
-    existing.isModified("line_items") ||
-    existing.isModified("total") ||
-    existing.isModified("advance_paid") ||
-    existing.isModified("balance_due") ||
-    existing.isModified("payment_status") ||
-    existing.isModified("therapist_name") ||
-    (existing as any).isModified("therapist_id") ||
-    existing.isModified("session_number") ||
-    existing.isModified("payments");
-  if (pdfVisibleChanged) existing.pdf_url = null;
 
   await existing.save();
   return existing;
@@ -894,7 +878,6 @@ export async function createManualInvoice(
     balance_due,
     total,
     payment_status,
-    pdf_url: null,
     created_by: input.created_by ?? "manual",
     last_edited_by: null,
     last_edited_at: null,

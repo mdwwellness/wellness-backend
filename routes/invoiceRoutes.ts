@@ -15,7 +15,7 @@ invoiceRouter.get("/", userAuth, getInvoices);
 invoiceRouter.post("/", userAuth, createInvoice);
 invoiceRouter.get("/:invoiceId", userAuth, getInvoice);
 invoiceRouter.patch("/:invoiceId", userAuth, updateInvoice);
-invoiceRouter.post("/:invoiceId/pdf", userAuth, generateInvoicePdf);
+invoiceRouter.get("/:invoiceId/pdf", userAuth, generateInvoicePdf);
 invoiceRouter.post("/:invoiceId/void", userAuth, voidInvoice);
 
 export default invoiceRouter;
