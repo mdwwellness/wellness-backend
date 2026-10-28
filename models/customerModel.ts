@@ -1,6 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 
 import { GENDERS } from "../lib/personDetails.ts";
+import { NOTE_KINDS } from "../lib/customerNotes.ts";
 
 export { GENDERS };
 
@@ -60,6 +61,12 @@ const customerSchema = new Schema(
         by: { type: String, required: true },
         userId: { type: String, default: "" },
         note: { type: String, required: true },
+        // Who the note is from, set by the server: "office" (staff on the
+        // Customers page), "therapist" (a general note by a therapist) or
+        // "session" (a copy of a completed session's note, with its booking).
+        kind: { type: String, enum: NOTE_KINDS },
+        enquiryId: String,
+        session: Number,
       },
     ],
   },

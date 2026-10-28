@@ -113,6 +113,16 @@ const AppointmentBookingSchema = new Schema({
     // saves it as they type). Filed into sessionNotes and cleared on completion.
     // Kept apart from `note`, which is the customer's / office's enquiry note.
     sessionNoteDraft: { type: String, default: "" },
+    // What the customer said when they asked again about this same request
+    // (a repeat folded into the open lead). `note` stays their first message.
+    customerNotes: [
+        {
+            _id: false,
+            at: { type: String, required: true },
+            note: { type: String, required: true },
+            repeat: Number,
+        },
+    ],
     doctor: {
         type: String,
     },

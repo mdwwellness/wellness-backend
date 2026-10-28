@@ -335,6 +335,11 @@ export async function createBooking(
       // A repeat can still bring details the first request didn't have.
       if (!existing.gender && input.gender) existing.gender = input.gender;
       if (!existing.age && input.age) existing.age = input.age;
+      // Their new message is a customer note on the lead, not just log text.
+      const repeatNote = typeof input.note === "string" ? input.note.trim() : "";
+      if (repeatNote) {
+        existing.customerNotes.push({ at: new Date().toISOString(), note: repeatNote, repeat: repeatCount });
+      }
       await existing.save();
       await ensureCustomerForAppointment(existing);
       logger.info("Booking repeat folded into existing lead", {

@@ -658,6 +658,7 @@ export const completeSession = async (req: Request, res: Response) => {
         }
 
         const sessionsDone = bumped.sessionsCompleted ?? 0;
+        const sessionNo = ownSession?.session ?? existing.addonOf?.session ?? sessionsDone;
         const done = sessionsDone >= total;
 
         const actorName = (req.user as any)?.userfName
@@ -720,7 +721,7 @@ export const completeSession = async (req: Request, res: Response) => {
                 $push: {
                     activityLog: logEntry,
                     sessionNotes: {
-                        session: ownSession?.session ?? existing.addonOf?.session ?? sessionsDone,
+                        session: sessionNo,
                         at: new Date().toISOString(),
                         note: sessionNote,
                         therapist: existing.doctor ?? "",
@@ -762,6 +763,11 @@ export const completeSession = async (req: Request, res: Response) => {
                                 by: actorName,
                                 userId: String((req.user as any)?.id ?? (req.user as any)?._id ?? ""),
                                 note: sessionNote.trim(),
+                                // A copy of this session's note, so a therapist sees the
+                                // customer's history across other therapists' bookings.
+                                kind: "session",
+                                enquiryId: existing.enquiryId,
+                                session: sessionNo,
                             },
                         },
                     },

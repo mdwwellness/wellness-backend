@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import Customer from "../models/customerModel.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { formatCustomerId, withPhoneLock } from "../lib/invoiceGeneration.ts";
+import { authorNameOf, canEditNote, noteKindFor, userIdOf } from "../lib/customerNotes.ts";
 
 function parseSearchToPhone(q: string): number | null {
   const digits = q.replace(/[^\d]/g, "");
@@ -146,22 +147,33 @@ export async function updateCustomer(req: Request, res: Response) {
     if (patch.notes) {
       if (!Array.isArray(customer.notes)) customer.notes = [];
 
-      // Add a new note
+      // Add a new note: author, time and kind come from the login, not the body.
       if (patch.notes.add && typeof patch.notes.add === "object") {
-        const { at, by, userId, note } = patch.notes.add;
-        if (at && by && note) {
-          customer.notes.push({ at, by, userId: userId ?? "", note });
+        const note = String(patch.notes.add.note ?? "").trim();
+        if (note) {
+          customer.notes.push({
+            at: new Date().toISOString(),
+            by: authorNameOf(req.user as any),
+            userId: userIdOf(req.user as any),
+            note,
+            kind: noteKindFor(req.user?.role),
+          });
         }
       }
 
-      // Edit an existing note (match by at timestamp + by field)
+      // Edit an existing note (match by at timestamp + by field). Only its
+      // author or an Admin, and never a session's copy.
       if (patch.notes.edit && typeof patch.notes.edit === "object") {
-        const { at, by, note } = patch.notes.edit;
+        const { at, by } = patch.notes.edit;
+        const note = String(patch.notes.edit.note ?? "").trim();
         if (at && by && note) {
           const idx = customer.notes.findIndex(
-            (n) => n.at === at && n.by === by
+            (n: { at?: string; by?: string }) => n.at === at && n.by === by
           );
           if (idx !== -1) {
+            if (!canEditNote(customer.notes[idx] as any, req.user as any)) {
+              return res.status(403).send({ success: false, message: "You can only edit your own notes." });
+            }
             customer.notes[idx].note = note;
           }
         }

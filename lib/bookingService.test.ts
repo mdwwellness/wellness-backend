@@ -41,6 +41,7 @@ function lead(fields: Record<string, unknown> = {}) {
     status: "enquiry",
     repeatCount: 1,
     activityLog: [] as { action: string }[],
+    customerNotes: [] as unknown[], // real records always have the list
     save: vi.fn(),
     ...fields,
   };
@@ -78,6 +79,19 @@ describe("createBooking: repeat folding", () => {
     );
     expect(existing.save).toHaveBeenCalled();
     expect(m.created).toHaveLength(0);
+  });
+
+  it("a repeat's message becomes a customer note on the lead; the first message stays", async () => {
+    const existing: any = lead({ note: "Back pain" });
+    m.find.mockResolvedValue([existing]);
+
+    await createBooking(request({ note: "  Now also neck stiffness " }), { foldOpenRepeats: true });
+    await createBooking(request({}), { foldOpenRepeats: true }); // no message: nothing added
+
+    expect(existing.note).toBe("Back pain");
+    expect(existing.customerNotes).toEqual([
+      { at: expect.any(String), note: "Now also neck stiffness", repeat: 2 },
+    ]);
   });
 
   it("a repeat fills the lead's missing gender and age, and passes them to the customer", async () => {
