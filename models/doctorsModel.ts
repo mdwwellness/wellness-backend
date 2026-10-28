@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { parseProfileLink } from "../lib/profileLink.ts";
 
 const doctorsSchema = new mongoose.Schema({
     doctorId: {
@@ -47,6 +48,16 @@ const doctorsSchema = new mongoose.Schema({
     },
     bio: {
         type: String,
+    },
+    // A pasted link to the therapist's profile elsewhere (LinkedIn, Practo, own
+    // site). http(s) only, checked here so every create/update path enforces it.
+    profileLink: {
+        type: String,
+        default: "",
+        validate: {
+            validator: (v: string) => parseProfileLink(v) !== null,
+            message: "Profile link must be a full http:// or https:// address.",
+        },
     },
     // ── Media managed from the dashboard (uploaded via UploadThing) ──
     profileImage: {

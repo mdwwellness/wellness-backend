@@ -8,6 +8,7 @@ import { Types } from "mongoose";
 import { logger } from "../lib/logger.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { canManageSplit, parseSplitPercent } from "../lib/therapistSplit.ts";
+import { parseProfileLink } from "../lib/profileLink.ts";
 import { withUniqueReferralCode } from "../lib/referralCode.ts";
 import { mayActOnTherapist, ownDoctorId } from "../lib/payments.ts";
 import { HIDDEN_FROM_THERAPISTS } from "../lib/bookingSource.ts";
@@ -27,6 +28,16 @@ function readSplitUpdate(req: Request): { fields: { splitPercent?: number }; err
     return { fields: {}, error: "Earnings split must be a number between 0 and 100." };
   }
   return { fields: { splitPercent: split } };
+}
+
+/** The profile link from the body, cleaned; absent means "leave it as is". */
+function readProfileLink(req: Request): { fields: { profileLink?: string }; error?: string } {
+  if (req.body?.profileLink === undefined) return { fields: {} };
+  const profileLink = parseProfileLink(req.body.profileLink);
+  if (profileLink == null) {
+    return { fields: {}, error: "Profile link must be a full http:// or https:// address." };
+  }
+  return { fields: { profileLink } };
 }
 
 
@@ -235,10 +246,12 @@ export async function updateDoctorDetails(req: Request, res: Response) {
     const isActive = isTherapist ? undefined : req.body.isActive;
     const split = readSplitUpdate(req);
     if (split.error) return res.status(400).json({ message: split.error });
+    const link = readProfileLink(req);
+    if (link.error) return res.status(400).json({ message: link.error });
 
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { doctorId: id },
-      { name, doctorId, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays, ...split.fields },
+      { name, doctorId, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays, ...split.fields, ...link.fields },
       { new: true, runValidators: true }
     );
 
@@ -314,6 +327,9 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
     const split = readSplitUpdate(req);
     if (split.error) return res.status(400).json({ message: split.error });
     Object.assign(doctorUpdate, split.fields);
+    const link = readProfileLink(req);
+    if (link.error) return res.status(400).json({ message: link.error });
+    Object.assign(doctorUpdate, link.fields);
 
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { doctorId: id },
