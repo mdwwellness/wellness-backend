@@ -172,6 +172,14 @@ describe("completeSession: the work is recorded first", () => {
     expect(final.$push.sessionNotes.note).toBe("Lower back, dry needling");
   });
 
+  it("a single visit is announced as a visit, not a package", async () => {
+    appt.sessionNoteDraft = "Knee mobilisation";
+    appt.sessionsCompleted = 1; // what the session-count bump returns for a one-visit booking
+    const r = res();
+    await completeSession(done({ performed: true }), r);
+    expect((r.send as any).mock.calls[0][0]).toMatchObject({ success: true, message: "Visit completed" });
+  });
+
   it("refuses to complete until this visit's payment is collected (moved here from the start)", async () => {
     appt.quotedPrice = 1600;
     appt.paymentAmount = 600; // ₹1,000 still owed on this visit

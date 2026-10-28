@@ -781,7 +781,9 @@ export const completeSession = async (req: Request, res: Response) => {
             success: true,
             message: sessionLabel
                 ? `${sessionLabel} completed`
-                : done ? "Package complete" : `Session ${sessionsDone} of ${total} completed`,
+                : done
+                    ? total > 1 ? "Package complete" : "Visit completed"
+                    : `Session ${sessionsDone} of ${total} completed`,
             data: finalUpdate,
         });
     } catch (error: any) {
