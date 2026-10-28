@@ -88,3 +88,44 @@ describe("one invoice per booking", () => {
     expect(inv.invoice_id).toBe("INV-1");
   });
 });
+
+describe("consultation price (ISSUES #41)", () => {
+  // Booked from the dashboard: no `service`, ₹600 less a ₹60 offer, paid.
+  const consult = {
+    _id: "c1", enquiryId: "ENQ-9", name: "Asha", phonenumber: 9876500001, typeOfappointment: "consultation", service: "",
+    quotedPrice: 540, paymentAmount: 540, status: "scheduled", recommendedServices: [],
+    slot: { date: new Date("2026-10-24T00:00:00Z"), time: "12:30" }, payments: [{ amount: 540, method: "upi", at: new Date("2026-10-24T05:00:00Z") }],
+  };
+
+  it("a dashboard-booked consultation is billed at its quote, not a flat ₹500", async () => {
+    m.rows.c1 = consult;
+    await maybeCreateInvoiceForAppointment({ appointment: consult });
+    expect(m.created[0].line_items).toMatchObject([{ description: "Online Consultation", price: 540, paid: 540 }]);
+    expect(m.created[0]).toMatchObject({ total: 540, advance_paid: 540, balance_due: 0 });
+  });
+
+  it("an open invoice billed at ₹500 is corrected to the quote on its next sync", async () => {
+    m.rows.c1 = consult;
+    m.invoices.c1 = openInvoice({ invoice_id: "INV-9", line_items: [{ description: "Online Consultation", price: 500 }] });
+    const inv: any = await syncInvoiceFromAppointment({ appointment: consult });
+    expect(inv).toMatchObject({ total: 540, advance_paid: 540, balance_due: 0, payment_status: "paid" });
+  });
+});
+
+describe("a paid invoice still takes new charges (ISSUES #42)", () => {
+  it("an add-on confirmed and paid after the invoice was paid is added to it", async () => {
+    const booking = {
+      _id: "h1", enquiryId: "ENQ-8", name: "Asha", phonenumber: 9876500001, typeOfappointment: "appointment", service: "Home Therapy",
+      quotedPrice: 1600, paymentAmount: 1600, status: "completed", slot: { date: new Date("2026-10-26T00:00:00Z"), time: "13:00" },
+      recommendedServices: [{ serviceId: "SRV-2", serviceName: "Acupuncture", quotedPrice: 500, status: "confirmed", recommendedAt: "t9", paidAmount: 500, paymentCollected: true }],
+      payments: [{ amount: 1600, method: "upi", at: new Date("2026-10-26T08:15:00Z") }, { amount: 500, method: "upi", at: new Date("2026-10-26T08:21:00Z"), for: "Acupuncture" }],
+    };
+    m.rows.h1 = booking;
+    m.invoices.h1 = openInvoice({ invoice_id: "INV-8", payment_status: "paid", total: 1600, advance_paid: 1600, line_items: [{ description: "Home Visit Consultation", price: 1600 }] });
+
+    const inv: any = await syncInvoiceFromAppointment({ appointment: booking });
+
+    expect(inv.line_items.map((l: any) => `${l.description} ${l.price}`)).toEqual(["Home Visit Consultation 1600", "Add-on: Acupuncture 500"]);
+    expect(inv).toMatchObject({ total: 2100, advance_paid: 2100, balance_due: 0, payment_status: "paid" });
+  });
+});

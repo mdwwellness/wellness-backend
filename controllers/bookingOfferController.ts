@@ -5,6 +5,7 @@ import { moneyRowFor, addonKey } from "../lib/payments.ts";
 import { addonPaid } from "../lib/bookingMoney.ts";
 import { offerIsApplicable, offerMoney } from "../lib/offers.ts";
 import { logger } from "../lib/logger.ts";
+import { safeSyncInvoiceFromAppointment } from "../lib/invoiceGeneration.ts";
 
 /**
  * Apply / remove an Offer on one priced line of a booking. The server is the
@@ -19,6 +20,11 @@ import { logger } from "../lib/logger.ts";
 
 const userLabel = (user: any) =>
   user?.userfName ? `${user.userfName ?? ""} ${user.userlName ?? ""}`.trim() : (user?.userEmail ?? "");
+
+// The line's price just changed, so the booking's invoice must show it (ISSUES
+// #42).
+const syncInvoice = (booking: any, user: any) =>
+  booking && safeSyncInvoiceFromAppointment({ appointment: booking, actor: { name: userLabel(user), email: user?.userEmail } });
 
 const findAddon = (row: any, key: string | undefined) =>
   key ? (row?.recommendedServices ?? []).find((r: any) => addonKey(r.serviceId, r.recommendedAt) === key) : undefined;
@@ -177,6 +183,7 @@ export const applyOffer = async (req: Request, res: Response) => {
       return res.status(409).send({ success: false, message: "The booking just changed - refresh and try again." });
     }
 
+    await syncInvoice(write, user);
     logger.info("Offer applied", { bookingId: String(doc._id), offerId: String(offer._id), off: money.off });
     return res.status(200).send({ success: true, message: "Offer applied", data: { off: money.off, final: money.final, booking: write } });
   } catch (error: any) {
@@ -202,17 +209,18 @@ export const removeOffer = async (req: Request, res: Response) => {
     const logAction = `Removed offer ${entry.offerName}`;
     const log = { at: nowIso, userId: String(user?._id ?? ""), name: userLabel(user), action: logAction };
 
+    let updated;
     if (kind === "add_on") {
       const addon = findAddon(doc, aKey);
       if (!addon) return res.status(404).send({ success: false, message: "Add-on not found on this booking." });
-      await AppointmentBooking.findOneAndUpdate(
+      updated = await AppointmentBooking.findOneAndUpdate(
         { _id: doc._id, recommendedServices: { $elemMatch: { serviceId: addon.serviceId, recommendedAt: addon.recommendedAt } } },
         { $set: { "recommendedServices.$.quotedPrice": entry.base }, $pull: { appliedOffers: { offerId: entry.offerId, addonKey: aKey } }, $push: { activityLog: log } },
         { new: true },
       ).exec();
     } else {
       const isCourse = doc.bookingKind === "course";
-      await AppointmentBooking.findOneAndUpdate(
+      updated = await AppointmentBooking.findOneAndUpdate(
         { _id: doc._id },
         {
           $set: {
@@ -230,6 +238,7 @@ export const removeOffer = async (req: Request, res: Response) => {
     }
 
     await releaseOffer(entry.offerId); // free the redemption
+    await syncInvoice(updated, user);
     logger.info("Offer removed", { bookingId: String(doc._id), offerId: entry.offerId });
     return res.status(200).send({ success: true, message: "Offer removed" });
   } catch (error: any) {

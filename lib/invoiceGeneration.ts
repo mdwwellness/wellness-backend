@@ -416,10 +416,13 @@ async function buildLineItemsFromAppointment(
     appointment.bookingKind === "course" && dates.length > 1 ? courseLabel(dates) : visitLabel(appointment);
   const mainPaid = (price: number) => Math.min(price, safeNumber(appointment.paymentAmount));
 
+  // A consultation means the same wherever it was booked, so it's priced from
+  // its quote too. Without this a dashboard-booked one (no `service`) fell to
+  // the legacy flat ₹500 and ignored its quote and offers (ISSUES #41).
   const confirmedService =
     !service?.isPackage &&
-    appointment.typeOfappointment &&
-    ENQUIRY_OFFERINGS.has(appointment.service)
+    (appointment.typeOfappointment === "consultation" ||
+      (appointment.typeOfappointment && ENQUIRY_OFFERINGS.has(appointment.service)))
       ? BOOKING_TYPE_SERVICE[appointment.typeOfappointment as string]
       : undefined;
 
@@ -466,6 +469,36 @@ async function buildLineItemsFromAppointment(
   return line_items;
 }
 
+/**
+ * What a booking's invoice bills: its lines, total and what's been paid. The
+ * one place creating and updating an invoice both get their money from.
+ */
+async function invoiceMoney(appointment: any, billed: any, lockedAddonItems?: any[]) {
+  const service = appointment.packageServiceId
+    ? await Service.findOne({ serviceId: appointment.packageServiceId }).exec()
+    : appointment.service
+      ? await Service.findOne({ name: appointment.service }).exec()
+      : null;
+  const invoice_type = deriveInvoiceType(appointment, service);
+  const line_items = await buildLineItemsFromAppointment(billed, service, invoice_type, lockedAddonItems);
+  const total = line_items.reduce((sum, li) => sum + safeNumber(li.price), 0);
+  const consultPaid =
+    hasConsultationCharge(appointment) && appointment.consultationCompleted ? CONSULT_FEE : 0;
+  const advance_paid =
+    safeNumber(appointment.paymentAmount ?? 0) + // part-payments count too
+    mergeAddonItems(billed, lockedAddonItems).reduce((s, a) => s + a.paid, 0) +
+    consultPaid;
+  const balance_due = Math.max(0, total - advance_paid);
+  const payment_status: "paid" | "pending" = advance_paid > 0 && balance_due <= 0 ? "paid" : "pending";
+  return { service, invoice_type, line_items, items_subtotal: total, total, advance_paid, balance_due, payment_status };
+}
+
+/** The money an invoice for this booking would show right now. Reads only. */
+export async function invoiceMoneyFor(row: any, lockedAddonItems?: any[]) {
+  const { booking, billed } = await billedBooking(row);
+  return invoiceMoney(booking, billed, lockedAddonItems);
+}
+
 async function createInvoiceFromAppointment(args: {
   appointment: any;
   actor?: Actor;
@@ -478,24 +511,10 @@ async function createInvoiceFromAppointment(args: {
 
   const customer = await ensureCustomerForAppointment(appointment);
 
-  const service = appointment.packageServiceId
-    ? await Service.findOne({ serviceId: appointment.packageServiceId }).exec()
-    : appointment.service
-      ? await Service.findOne({ name: appointment.service }).exec()
-      : null;
-
-  const invoice_type = deriveInvoiceType(appointment, service);
-
-  const therapist_name = appointment.doctor ?? "";
-
   const { billed } = await billedBooking(appointment);
-  const line_items = await buildLineItemsFromAppointment(
-    billed,
-    service,
-    invoice_type,
-  );
-
-  const items_subtotal = line_items.reduce((sum, li) => sum + safeNumber(li.price), 0);
+  const { service, invoice_type, line_items, items_subtotal, total, advance_paid, balance_due, payment_status } =
+    await invoiceMoney(appointment, billed);
+  const therapist_name = appointment.doctor ?? "";
 
   // Nothing could price this appointment - no quotedPrice, no paymentAmount and
   // no catalogue price. Refuse rather than bill ₹0: a phantom invoice would burn
@@ -514,21 +533,6 @@ async function createInvoiceFromAppointment(args: {
 
   const seq = await nextYearlySequence("invoice", year);
   const invoice_id = formatInvoiceId(year, seq);
-
-  const total = items_subtotal;
-
-  const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
-  const addonPaid = mergeAddonItems(billed)
-    .reduce((s, a) => s + a.paid, 0);
-  const consultPaid =
-    hasConsultationCharge(appointment) && appointment.consultationCompleted
-      ? CONSULT_FEE
-      : 0;
-  const advance_paid = packageAdvance + addonPaid + consultPaid;
-  const balance_due = Math.max(0, total - advance_paid);
-
-  const payment_status: "paid" | "pending" =
-    advance_paid > 0 && balance_due <= 0 ? "paid" : "pending";
 
   const package_type = service?.isPackage ? "standard" : null;
   const package_ref = service?.isPackage ? service.serviceId : null;
@@ -615,72 +619,31 @@ export async function syncInvoiceFromAppointment(args: {
   // A voided invoice is a frozen audit record - nothing re-derives it.
   if (existing.voided) return existing;
 
-  // ── The money is frozen once the invoice is paid ──
-  // Read the STORED status before we compute anything: re-deriving the amount
-  // from the current appointment would silently re-price an invoice the
-  // customer has already paid against (e.g. an executive edits the fee in the
-  // enquiry drawer after payment). A real change to a settled invoice goes
-  // through void + reissue, not a silent rewrite. Non-money FACTS still sync
-  // below - under the pay-first funnel the therapist is assigned AFTER payment,
-  // so a paid invoice must still be able to pick up its doctor.
-  const wasPaid = existing.payment_status === "paid";
+  // The invoice always mirrors its booking, paid or not. It used to freeze once
+  // paid, so an add-on confirmed after payment never reached the bill (ISSUES
+  // #42). What that freeze guarded against is now stopped at the booking: its
+  // price is locked once money is in (lib/lockedFields.ts) and an offer can't
+  // price it below what's paid (lib/offers.ts offerMoney).
 
   // Backfill customer_id onto the appointment on the update path too - the
   // create path already does this via maybeCreate. Idempotent (keyed by phone).
   await ensureCustomerForAppointment(appointment);
 
-  const service = appointment.packageServiceId
-    ? await Service.findOne({ serviceId: appointment.packageServiceId }).exec()
-    : appointment.service
-      ? await Service.findOne({ name: appointment.service }).exec()
-      : null;
-
-  // Re-derive the invoice type from the CURRENT appointment state so a lead
-  // first invoiced at the consultation step gets corrected to package billing
-  // once a therapy package is chosen/paid (fixes "online_consultation" showing
-  // on a Home-Therapy package).
-  const invoice_type = deriveInvoiceType(appointment, service);
-  const line_items = await buildLineItemsFromAppointment(
-    billed,
-    service,
-    invoice_type,
-    existing.locked_addon_items,
-  );
-  const items_subtotal = line_items.reduce(
-    (sum, li) => sum + safeNumber(li.price),
-    0,
-  );
-  const total = items_subtotal;
-  const packageAdvance = safeNumber(appointment.paymentAmount ?? 0); // part-payments count too
-  const addonPaid = mergeAddonItems(billed, existing.locked_addon_items)
-    .reduce((s, a) => s + a.paid, 0);
-  const consultPaid =
-    hasConsultationCharge(appointment) && appointment.consultationCompleted
-      ? CONSULT_FEE
-      : 0;
-  const advance_paid = packageAdvance + addonPaid + consultPaid;
-  const balance_due = Math.max(0, total - advance_paid);
-  const payment_status: "paid" | "pending" =
-    advance_paid > 0 && balance_due <= 0 ? "paid" : "pending";
+  const { invoice_type, line_items, items_subtotal, total, advance_paid, balance_due, payment_status } =
+    await invoiceMoney(appointment, billed, existing.locked_addon_items);
 
   const editor =
     (actor?.name ?? "").trim() ||
     (actor?.email ?? "").trim() ||
     "system";
 
-  // Money + billing identity: re-derived only while the invoice is still open.
-  // Frozen once paid (see wasPaid above).
-  if (!wasPaid) {
-    existing.invoice_type = invoice_type;
-    existing.line_items = line_items;
-    existing.items_subtotal = items_subtotal;
-    existing.total = total;
-    existing.advance_paid = advance_paid;
-    existing.balance_due = balance_due;
-    existing.payment_status = payment_status;
-  }
-  // Non-money facts sync either way - an invoice created before the physio was
-  // assigned would otherwise never show a therapist.
+  existing.invoice_type = invoice_type;
+  existing.line_items = line_items;
+  existing.items_subtotal = items_subtotal;
+  existing.total = total;
+  existing.advance_paid = advance_paid;
+  existing.balance_due = balance_due;
+  existing.payment_status = payment_status;
   existing.therapist_name = appointment.doctor || existing.therapist_name;
   (existing as any).therapist_id =
     appointment.doctorId || (existing as any).therapist_id || "";
@@ -692,7 +655,6 @@ export async function syncInvoiceFromAppointment(args: {
   (existing as any).payments = invoicePayments(billed);
   existing.last_edited_by = editor;
   existing.last_edited_at = new Date();
-
 
   await existing.save();
   return existing;
