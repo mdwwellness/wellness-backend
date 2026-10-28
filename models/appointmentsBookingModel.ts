@@ -109,6 +109,10 @@ const AppointmentBookingSchema = new Schema({
     note: {
         type: String,
     },
+    // The therapist's session note while the visit is in progress (the Visit tab
+    // saves it as they type). Filed into sessionNotes and cleared on completion.
+    // Kept apart from `note`, which is the customer's / office's enquiry note.
+    sessionNoteDraft: { type: String, default: "" },
     doctor: {
         type: String,
     },

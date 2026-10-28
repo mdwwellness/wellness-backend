@@ -578,8 +578,10 @@ export const completeSession = async (req: Request, res: Response) => {
         // ticked and a session note written. The tick can arrive with this
         // request (it may still be saving). The office's "Complete anyway" on
         // their behalf is the recorded override.
+        // Never falls back to `note`: that's the customer's enquiry note, not the
+        // therapist's (it used to get filed as the session note).
         const sessionNote =
-            (typeof req.body?.note === "string" ? req.body.note : "") || existing.note || "";
+            (typeof req.body?.note === "string" ? req.body.note : "") || existing.sessionNoteDraft || "";
         const performed =
             req.body?.performed === true || (existing.workChecklist ?? []).includes("performed");
         if ((req.user as any)?.role === "THERAPIST" && (!performed || !sessionNote.trim())) {
@@ -712,11 +714,9 @@ export const completeSession = async (req: Request, res: Response) => {
                 // checklist (arrived/performed/completed) resets for next visit.
                 workChecklist: [],
                 // Snapshot this session's note into the per-session log, then blank
-                // the working note so the next visit starts clean. Prefer the
-                // note sent in the request body (the frontend may hold a newer
-                // value that hasn't been persisted to the doc yet) and fall
-                // back to whatever is already stored.
-                note: "",
+                // the draft so the next visit starts clean. The customer's `note`
+                // is left alone.
+                sessionNoteDraft: "",
                 $push: {
                     activityLog: logEntry,
                     sessionNotes: {

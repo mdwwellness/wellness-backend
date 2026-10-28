@@ -150,6 +150,28 @@ describe("completeSession: the work is recorded first", () => {
     expect((r.send as any).mock.calls[0]?.[0]?.message).not.toBe("Tick Service performed and write the session note first.");
   });
 
+  it("never files the customer's enquiry note as the therapist's session note", async () => {
+    appt.note = "Customer: back pain for two weeks";
+    const r = res();
+    await completeSession(done({ performed: true }), r);
+    expect(r.status).toHaveBeenCalledWith(400);
+    expect((r.send as any).mock.calls[0][0].message).toBe("Tick Service performed and write the session note first.");
+  });
+
+  it("a draft saved from the Visit tab counts as the note, and completion clears only the draft", async () => {
+    appt.note = "Customer: back pain for two weeks";
+    appt.sessionNoteDraft = "Lower back, dry needling";
+    const r = res();
+    await completeSession(done({ performed: true }), r);
+    expect((r.send as any).mock.calls[0]?.[0]?.message).not.toBe("Tick Service performed and write the session note first.");
+    const writes = mockFindOneAndUpdate.mock.calls.map((c) => c[1]);
+    const final = writes.find((u: any) => u && "sessionNoteDraft" in u);
+    expect(final).toBeDefined();
+    expect(final.sessionNoteDraft).toBe("");
+    expect(final).not.toHaveProperty("note");
+    expect(final.$push.sessionNotes.note).toBe("Lower back, dry needling");
+  });
+
   it("refuses to complete until this visit's payment is collected (moved here from the start)", async () => {
     appt.quotedPrice = 1600;
     appt.paymentAmount = 600; // ₹1,000 still owed on this visit
