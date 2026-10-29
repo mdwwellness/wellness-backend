@@ -212,8 +212,9 @@ export async function generateInvoicePdf(req: Request, res: Response) {
     if (!invoice) return res.status(404).send({ success: false, message: "Invoice not found" });
 
     const pdf = await renderInvoicePdf(await invoiceView(invoice));
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${invoice.invoice_id}.pdf"`);
+    // Saved as e.g. "INV-2026-0078 Asha Verma.pdf". Express escapes the name
+    // and sets the PDF type.
+    res.attachment(`${[invoice.invoice_id, invoice.customer_name?.trim()].filter(Boolean).join(" ")}.pdf`);
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).send(pdf);
   } catch (err: any) {

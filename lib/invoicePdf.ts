@@ -233,12 +233,12 @@ type Cell = {
   main: string;
   sub?: string;
   color?: string;
-  /** The sub line is the price before the discount: "MRP" and the old price struck through. */
+  /** The sub line is the price before the discount, struck through. */
   mrp?: boolean;
   tnum?: boolean;
   muted?: boolean;
 };
-// Unit price is wide enough for "MRP ₹12,000.00" at full size on one line.
+// Unit price is wide enough for "₹1,20,000.00" at full size on one line.
 const COLS: { title: string; w: number; align?: "left" | "right" | "center" }[] = [
   { title: "#", w: 22 },
   { title: "Service", w: 0 },
@@ -284,12 +284,10 @@ function cellHeight(doc: Doc, c: Cell, w: number): number {
   return c.sub ? main + 2 + height(doc, c.sub, w, R, c.mrp ? MAIN : SUB) : main;
 }
 
-/** "MRP ~~₹1,600.00~~", right-aligned, same size as the price so it reads on paper. */
+/** "~~₹1,600.00~~", right-aligned, same size as the price so it reads on paper. */
 function mrpLine(doc: Doc, amount: string, right: number, y: number) {
   doc.font(R).fontSize(MAIN);
   const amountW = doc.widthOfString(amount, { features: ["tnum"] });
-  const labelW = doc.widthOfString("MRP ");
-  text(doc, "MRP ", right - amountW - labelW, y, { size: MAIN, color: C.muted });
   // pdfkit needs a box width to draw the strike; a little slack keeps it on one line.
   text(doc, amount, right - amountW, y, { size: MAIN, color: C.muted, strike: true, tnum: true, width: amountW + 2 });
 }
@@ -355,7 +353,7 @@ function totalsAndNotes(doc: Doc, v: InvoiceView, y: number): number {
   const rows: { label: string; value: string; strong?: boolean; due?: boolean; lineAbove?: boolean }[] = [
     ...(t.discount > 0
       ? [
-          { label: "Total (MRP)", value: money(t.mrp) },
+          { label: "Total", value: money(t.mrp) },
           { label: "Discount", value: `- ${money(t.discount)}` },
         ]
       : []),
