@@ -30,6 +30,7 @@ import { addonKey, courseSessionOf, isAssignedTherapist, mayActOnBooking, moneyR
 import { referrerForCode } from "../lib/referralCode.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
+import { withVisitStatus } from "../lib/visitStatus.ts";
 
 // Back-office roles that see every appointment / enquiry record.
 // THERAPIST is intentionally NOT in this set - therapists see only their
@@ -125,7 +126,8 @@ export const getAllAppointments = async (req: Request, res: Response) => {
 
         return res.status(200).send({
             success: true,
-            data: appointmentdetails,
+            // Each with its list status, the same for every viewer (lib/visitStatus.ts).
+            data: await withVisitStatus(appointmentdetails),
         });
     } catch (error: any) {
         console.error("Error fetching details:", error);
