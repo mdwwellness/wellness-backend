@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // One unpaid ₹600 consultation and one fixed ₹60 offer.
-const m = vi.hoisted(() => ({ booking: null as any, synced: [] as any[] }));
+const m = vi.hoisted(() => ({ booking: null as any, synced: [] as any[], usedOn: null as string | null }));
 
 vi.mock("../models/appointmentsBookingModel.ts", () => ({
   default: {
     findById: () => ({ exec: async () => m.booking }),
-    findOne: () => ({ select: () => ({ lean: async () => null }) }),
+    findOne: () => ({ select: () => ({ lean: async () => (m.usedOn ? { enquiryId: m.usedOn } : null) }) }),
     findOneAndUpdate: (_q: any, update: any) => ({
       exec: async () => {
-        m.booking = { ...m.booking, ...update.$set, appliedOffers: update.$push?.appliedOffers ? [update.$push.appliedOffers] : [] };
+        m.booking = { ...m.booking, ...update.$set, appliedOffers: update.$push?.appliedOffers ? [update.$push.appliedOffers] : [], activityLog: update.$push?.activityLog ? [update.$push.activityLog] : [] };
         return m.booking;
       },
     }),
@@ -35,11 +35,13 @@ function res() {
   r.send = (b: any) => ((r.body = b), r);
   return r;
 }
-const req = (body: object) => ({ params: { bookingId: "b1" }, body, user: { role: "ADMIN", userfName: "Asha" } }) as any;
+const req = (body: object, role = "ADMIN") => ({ params: { bookingId: "b1" }, body, user: { role, userfName: "Asha" } }) as any;
 
 beforeEach(() => {
-  m.booking = { _id: "b1", phonenumber: 9876500001, typeOfappointment: "consultation", quotedPrice: 600, paymentAmount: 0, appliedOffers: [], recommendedServices: [] };
+  m.booking = { _id: "b1", name: "launchman01", phonenumber: 9876500001, typeOfappointment: "consultation", quotedPrice: 600, paymentAmount: 0, appliedOffers: [], recommendedServices: [] };
   m.synced.length = 0;
+  m.usedOn = null;
+  OFFER.oncePerPhone = false;
 });
 
 describe("offers reach the invoice (ISSUES #42)", () => {
@@ -56,5 +58,43 @@ describe("offers reach the invoice (ISSUES #42)", () => {
     await removeOffer(req({ lineKind: "main" }), r);
     expect(r.code).toBe(200);
     expect(m.synced).toEqual([540, 600]);
+  });
+});
+
+describe("a once-per-phone offer used before", () => {
+  beforeEach(() => {
+    OFFER.oncePerPhone = true;
+    m.usedOn = "ENQ-0153";
+  });
+
+  it("asks an Admin to confirm, naming the earlier booking", async () => {
+    const r = res();
+    await applyOffer(req({ offerId: "o1" }), r);
+    expect(r.code).toBe(409);
+    expect(r.body).toMatchObject({ code: "OFFER_REPEAT_CONFIRM", message: "launchman01 already used Diwali on ENQ-0153." });
+    expect(m.synced).toEqual([]);
+  });
+
+  it("refuses Staff even when they ask to repeat", async () => {
+    const r = res();
+    await applyOffer(req({ offerId: "o1", repeat: true, note: "goodwill" }, "STAFF"), r);
+    expect(r.code).toBe(400);
+    expect(r.body.code).toBeUndefined();
+    expect(m.synced).toEqual([]);
+  });
+
+  it("needs a reason to repeat", async () => {
+    const r = res();
+    await applyOffer(req({ offerId: "o1", repeat: true }), r);
+    expect(r.code).toBe(400);
+    expect(m.synced).toEqual([]);
+  });
+
+  it("applies it again for an Admin with a reason, and logs why", async () => {
+    const r = res();
+    await applyOffer(req({ offerId: "o1", repeat: true, note: "goodwill" }), r);
+    expect(r.code).toBe(200);
+    expect(m.synced).toEqual([540]);
+    expect(m.booking.activityLog[0].action).toContain("again for this phone, first used on ENQ-0153. Reason: goodwill");
   });
 });

@@ -48,18 +48,21 @@ async function resolveOffer(offerId?: string, code?: string) {
   return Offer.findOne(clauses.length > 1 ? { $or: clauses } : clauses[0]).exec();
 }
 
-/** Has this phone already redeemed this offer on another booking? */
-async function phoneAlreadyUsed(phone: unknown, offerId: unknown, exceptId: unknown): Promise<boolean> {
-  if (phone == null || phone === "") return false;
-  const hit = await AppointmentBooking.findOne({
+/** The booking (ENQ id) on which this phone already redeemed this offer, if any. */
+async function phoneUsedOn(phone: unknown, offerId: unknown, exceptId: unknown): Promise<string | null> {
+  if (phone == null || phone === "") return null;
+  const hit: any = await AppointmentBooking.findOne({
     phonenumber: phone,
     _id: { $ne: exceptId },
     "appliedOffers.offerId": String(offerId),
   })
-    .select("_id")
+    .select("enquiryId")
     .lean();
-  return Boolean(hit);
+  return hit ? hit.enquiryId || String(hit._id) : null;
 }
+
+// Only these roles may apply a once-per-phone offer again, with a reason.
+const REPEAT_ROLES = new Set(["ADMIN", "SUPER_ADMIN"]);
 
 const bumpOffer = (offerId: unknown, totalUses: number | null | undefined) => {
   const cond: any = { _id: offerId };
@@ -73,7 +76,7 @@ export const applyOffer = async (req: Request, res: Response) => {
   let bumpedOfferId: unknown = null;
   try {
     const user: any = req.user;
-    const { offerId, code, lineKind = "main", addonKey: aKey, note } = req.body ?? {};
+    const { offerId, code, lineKind = "main", addonKey: aKey, note, repeat } = req.body ?? {};
 
     const booking = await AppointmentBooking.findById(req.params.bookingId).exec();
     if (!booking) return res.status(404).send({ success: false, message: "Booking not found" });
@@ -108,18 +111,15 @@ export const applyOffer = async (req: Request, res: Response) => {
     const paid = kind === "add_on" ? addonPaid(addon) : Number(doc.paymentAmount) || 0;
 
     const serviceId = kind === "add_on" ? addon?.serviceId : doc.packageServiceId;
-    const phoneUsed = offer.oncePerPhone !== false
-      ? await phoneAlreadyUsed(doc.phonenumber, offer._id, doc._id)
-      : false;
-
     const ctx = {
       userRole: user?.role ?? "",
       lineKind: (doc.bookingKind === "course" && kind === "main" ? "course" : kind) as "main" | "course" | "add_on",
       serviceId,
       now: new Date(),
-      phoneAlreadyUsed: phoneUsed,
     };
 
+    // Once-per-phone is checked last (below), so an expired or capped offer
+    // says so instead of asking to apply it again.
     const elig = offerIsApplicable(offer.toObject(), base, ctx);
     if (!elig.ok) return res.status(400).send({ success: false, message: elig.reason });
 
@@ -127,6 +127,23 @@ export const applyOffer = async (req: Request, res: Response) => {
     if (!money.ok) return res.status(400).send({ success: false, message: money.reason });
     if (offer.noteRequired && !String(note ?? "").trim()) {
       return res.status(400).send({ success: false, message: "A note is required for this offer." });
+    }
+
+    // Once per phone: an Admin or Super Admin may apply it again on purpose,
+    // with a reason. The dashboard asks first (code OFFER_REPEAT_CONFIRM).
+    const usedOn = offer.oncePerPhone !== false
+      ? await phoneUsedOn(doc.phonenumber, offer._id, doc._id)
+      : null;
+    const canRepeat = REPEAT_ROLES.has(user?.role);
+    if (usedOn && !(repeat === true && canRepeat)) {
+      const used = `${doc.name || "This customer"} already used ${offer.name} on ${usedOn}.`;
+      if (!canRepeat) {
+        return res.status(400).send({ success: false, message: `${used} Only an Admin or Super Admin can apply it again.` });
+      }
+      return res.status(409).send({ success: false, code: "OFFER_REPEAT_CONFIRM", message: used });
+    }
+    if (usedOn && !String(note ?? "").trim()) {
+      return res.status(400).send({ success: false, message: "Add a reason to apply this offer again." });
     }
 
     // Reserve a redemption (atomic against the usage cap).
@@ -148,7 +165,9 @@ export const applyOffer = async (req: Request, res: Response) => {
       note: String(note ?? "").trim(),
       appliedBy: { name: userLabel(user), at: new Date().toISOString() },
     };
-    const logAction = `Applied offer ${offer.name} (−₹${money.off})${kind === "add_on" ? " on add-on" : ""}`;
+    const logAction = `Applied offer ${offer.name} (−₹${money.off})${kind === "add_on" ? " on add-on" : ""}${
+      usedOn ? ` again for this phone, first used on ${usedOn}. Reason: ${String(note).trim()}` : ""
+    }`;
     const nowIso = new Date().toISOString();
 
     const write = kind === "add_on"
