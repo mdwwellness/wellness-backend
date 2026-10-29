@@ -78,7 +78,24 @@ export async function listBookingsForPhone(phone10: string): Promise<CustomerBoo
     .sort({ createdAt: -1 })
     .limit(100)
     .lean();
-  return docs.map((doc) => toCustomerBooking(doc));
+  // A package with a visit per session keeps sessions 2..N on rows of their
+  // own (same phone, so they're in this list), and the booking's own counter
+  // only ever covers session 1. Its progress is its done session rows (ISSUES
+  // #43). KEEP IN SYNC with the dashboard's courseProgressOf
+  // (src/lib/visit-groups.ts).
+  // ponytail: a session row outside the newest 100 isn't counted; it's created
+  // with its booking, so it sits next to it in this order.
+  const sessionsOf = new Map<string, any[]>();
+  for (const d of docs as any[]) {
+    const parent = d.packageOriginId && String(d.packageOriginId) !== String(d._id) ? String(d.packageOriginId) : null;
+    if (parent) sessionsOf.set(parent, [...(sessionsOf.get(parent) ?? []), d]);
+  }
+  return docs.map((doc: any) => {
+    const booking = toCustomerBooking(doc);
+    const sessions = sessionsOf.get(String(doc._id));
+    if (sessions) booking.sessionsCompleted = [doc, ...sessions].filter((v) => v.status === "completed").length;
+    return booking;
+  });
 }
 
 export type BookingRequest = {

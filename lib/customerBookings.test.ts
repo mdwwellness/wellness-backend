@@ -244,6 +244,20 @@ describe("listBookingsForPhone", () => {
     expect(result).toEqual([toCustomerBooking(fullDoc)]);
   });
 
+  it("a package with a visit per session counts its done session rows (ISSUES #43)", async () => {
+    const booking = { ...fullDoc, _id: "b1", bookingKind: "course", totalSessions: 4, sessionsCompleted: 1, status: "completed" };
+    const s2 = { ...fullDoc, _id: "b2", packageOriginId: "b1", totalSessions: 4, sessionsCompleted: 1, status: "completed" };
+    const s3 = { ...fullDoc, _id: "b3", packageOriginId: "b1", totalSessions: 4, sessionsCompleted: 1, status: "completed" };
+    const s4 = { ...fullDoc, _id: "b4", packageOriginId: "b1", totalSessions: 4, sessionsCompleted: 0, status: "scheduled" };
+    bookingsQueryReturns([booking, s2, s3, s4]);
+
+    const [first, ...rest] = await listBookingsForPhone("9876543210");
+
+    expect(first).toMatchObject({ sessionsCompleted: 3, totalSessions: 4 });
+    // Each session row still reports only itself.
+    expect(rest.map((b) => b.sessionsCompleted)).toEqual([1, 1, 0]);
+  });
+
   it("selects only what the view and the ledger need", async () => {
     const query = bookingsQueryReturns([]);
     await listBookingsForPhone("9876543210");
