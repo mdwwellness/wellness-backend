@@ -121,7 +121,8 @@ function rule(doc: Doc, y: number, color = C.border, x = PAGE.m, w = W) {
 function header(doc: Doc, v: InvoiceView): number {
   doc.rect(PAGE.m, PAGE.m, W, 3).fill(C.primary);
   const y = PAGE.m + 18;
-  drawMdwLogo(doc, PAGE.m, y + 1, 76);
+  // 96 wide (42 tall) keeps "My Dawai Wala" legible and clears the rule below.
+  drawMdwLogo(doc, PAGE.m, y - 2, 96);
   text(doc, BRAND.name, PAGE.m, y - 1, { font: S, size: 17, width: W, align: "center" });
   text(doc, BRAND.tagline, PAGE.m, y + 22, { size: 8.5, color: C.muted, width: W, align: "center" });
   const mw = 170;
