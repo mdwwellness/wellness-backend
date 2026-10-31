@@ -14,6 +14,8 @@ import { logger } from "./logger.ts";
 // When the visit has no end time.
 const DEFAULT_MINUTES = 30;
 
+type Meet = { link: string; eventId: string; start: string; end: string };
+
 /** An online consultation intake, not a home visit or a course row. */
 function isOnlineConsult(row: any): boolean {
   return row?.typeOfappointment === "consultation" && isIntake(row);
@@ -42,22 +44,23 @@ export function visitWindow(row: any): { start: Date; end: Date } | null {
   return { start, end: end && end > start ? end : new Date(start.getTime() + DEFAULT_MINUTES * 60_000) };
 }
 
-async function syncOnce(id: string): Promise<void> {
+/** Returns the call the booking has afterwards, or null. */
+async function syncOnce(id: string): Promise<Meet | null> {
   const row: any = await AppointmentBooking.findById(id).lean();
+  const meet: Meet | null = row?.meet?.eventId ? row.meet : null;
   // A finished call keeps its link as it was, for the record.
-  if (!row || row.status === "completed") return;
-  const meet = row.meet?.eventId ? row.meet : null;
+  if (!row || row.status === "completed") return meet;
   const live = isOnlineConsult(row) && (row.status === "scheduled" || row.status === "ongoing") && !!slotDay(row);
 
   if (!live) {
-    if (!meet) return;
+    if (!meet) return null;
     await deleteMeetEvent(meet.eventId);
     await AppointmentBooking.updateOne({ _id: id }, { $unset: { meet: 1 } });
-    return;
+    return null;
   }
 
   const when = visitWindow(row);
-  if (!when) return; // a time we can't read: leave any link as it is
+  if (!when) return meet; // a time we can't read: leave any link as it is
   const start = when.start.toISOString();
   const end = when.end.toISOString();
 
@@ -68,34 +71,42 @@ async function syncOnce(id: string): Promise<void> {
       start: when.start,
       end: when.end,
     });
-    const saved = await AppointmentBooking.updateOne(
-      { _id: id },
-      { $set: { meet: { link: made.meetLink, eventId: made.eventId, start, end } } },
-    );
+    const next = { link: made.meetLink, eventId: made.eventId, start, end };
+    const saved = await AppointmentBooking.updateOne({ _id: id }, { $set: { meet: next } });
     // Deleted while Google was busy: don't leave the event behind.
-    if (!saved.matchedCount) await deleteMeetEvent(made.eventId);
-  } else if (meet.start !== start || meet.end !== end) {
+    if (!saved.matchedCount) {
+      await deleteMeetEvent(made.eventId);
+      return null;
+    }
+    return next;
+  }
+  if (meet.start !== start || meet.end !== end) {
     await moveMeetEvent(meet.eventId, when.start, when.end);
     await AppointmentBooking.updateOne({ _id: id }, { $set: { "meet.start": start, "meet.end": end } });
+    return { ...meet, start, end };
   }
+  return meet;
 }
 
 // ponytail: per-booking queue in this process, so two quick saves can't make
 // two events. Fine on one Render instance; use a DB claim if it scales out.
-const queue = new Map<string, Promise<void>>();
+const queue = new Map<string, Promise<Meet | null>>();
 
 /**
- * Brings a booking's video call in line with its saved state. Never throws: a
- * Google failure is logged and the booking save still succeeds; the next save
- * of the booking tries again.
+ * Brings a booking's video call in line with its saved state, and returns the
+ * call it has afterwards (null: none). Never throws: a Google failure is
+ * logged (null) and the booking save still succeeds; the next save tries again.
  */
-export function syncBookingMeet(row: any): Promise<void> {
-  if (!row?._id || !googleMeetConfigured()) return Promise.resolve();
-  if (!isOnlineConsult(row) && !row.meet?.eventId) return Promise.resolve();
+export function syncBookingMeet(row: any): Promise<Meet | null> {
+  if (!row?._id || !googleMeetConfigured()) return Promise.resolve(null);
+  if (!isOnlineConsult(row) && !row.meet?.eventId) return Promise.resolve(null);
   const id = String(row._id);
-  const run = (queue.get(id) ?? Promise.resolve())
+  const run = (queue.get(id) ?? Promise.resolve(null))
     .then(() => syncOnce(id))
-    .catch((err) => logger.error(`[meet] sync failed for booking ${id}`, err));
+    .catch((err) => {
+      logger.error(`[meet] sync failed for booking ${id}`, err);
+      return null;
+    });
   queue.set(id, run);
   void run.finally(() => {
     if (queue.get(id) === run) queue.delete(id);

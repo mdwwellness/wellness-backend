@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   nextSequence: vi.fn(),
   ensureCustomer: vi.fn(),
   maybeInvoice: vi.fn(),
+  syncMeet: vi.fn(),
 }));
 
 vi.mock("../models/appointmentsBookingModel.ts", () => ({
@@ -20,6 +21,7 @@ vi.mock("../models/appointmentsBookingModel.ts", () => ({
   },
 }));
 vi.mock("./counters.ts", () => ({ nextSequence: m.nextSequence }));
+vi.mock("./bookingMeet.ts", () => ({ syncBookingMeet: m.syncMeet }));
 vi.mock("./logger.ts", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("./bookingSource.ts", () => ({
   resolveBookingSource: async () => ({ ok: true, fields: { source: "online" } }),
@@ -59,6 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.created.length = 0;
   m.nextSequence.mockResolvedValue(100);
+  m.syncMeet.mockResolvedValue(null);
 });
 
 describe("createBooking: repeat folding", () => {
@@ -141,6 +144,23 @@ describe("createBooking: customer link", () => {
 
     expect(m.created[0].customer_id).toBeUndefined();
     expect(m.ensureCustomer).toHaveBeenCalledWith(m.created[0]);
+  });
+});
+
+describe("createBooking: video call", () => {
+  it("returns the new booking with its Meet link, so the form can show it", async () => {
+    m.find.mockResolvedValue([]);
+    const meet = { link: "https://meet.google.com/abc-defg-hij", eventId: "ev1", start: "s", end: "e" };
+    m.syncMeet.mockResolvedValue(meet);
+    const result: any = await createBooking(request({ status: "scheduled" }));
+    expect(m.syncMeet).toHaveBeenCalledWith(m.created[0]);
+    expect(result.appointment.meet).toEqual(meet);
+  });
+
+  it("leaves it off when no call was made", async () => {
+    m.find.mockResolvedValue([]);
+    const result: any = await createBooking(request());
+    expect(result.appointment.meet).toBeUndefined();
   });
 });
 

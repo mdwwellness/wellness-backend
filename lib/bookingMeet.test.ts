@@ -86,8 +86,8 @@ describe("visitWindow", () => {
 });
 
 describe("syncBookingMeet", () => {
-  it("makes the call once a consultation has a confirmed slot", async () => {
-    await sync(consult());
+  it("makes the call once a consultation has a confirmed slot, and returns it", async () => {
+    await expect(sync(consult())).resolves.toMatchObject({ link: "https://meet.google.com/abc-defg-hij" });
     expect(m.create).toHaveBeenCalledTimes(1);
     expect(m.create.mock.calls[0][0].summary).toBe("MDW Wellness online consultation (ENQ-0101)");
     expect(m.rows.get("b1").meet).toEqual({
@@ -120,14 +120,17 @@ describe("syncBookingMeet", () => {
 
   it("moves the same event when the slot moves, keeping the link", async () => {
     await sync(consult());
-    await sync({ ...m.rows.get("b1"), therapyStartTime: "12:00", therapyEndTime: "12:30" });
+    await expect(sync({ ...m.rows.get("b1"), therapyStartTime: "12:00", therapyEndTime: "12:30" })).resolves.toMatchObject({
+      link: "https://meet.google.com/abc-defg-hij",
+      start: "2026-11-05T06:30:00.000Z",
+    });
     expect(m.move).toHaveBeenCalledWith("ev1", new Date("2026-11-05T06:30:00.000Z"), new Date("2026-11-05T07:00:00.000Z"));
     expect(m.rows.get("b1").meet).toMatchObject({ link: "https://meet.google.com/abc-defg-hij", start: "2026-11-05T06:30:00.000Z" });
   });
 
   it("removes the call when the booking is cancelled or stops being a consultation", async () => {
     await sync(consult());
-    await sync({ ...m.rows.get("b1"), status: "cancelled" });
+    await expect(sync({ ...m.rows.get("b1"), status: "cancelled" })).resolves.toBeNull();
     expect(m.del).toHaveBeenCalledWith("ev1");
     expect(m.rows.get("b1").meet).toBeUndefined();
 
@@ -168,7 +171,7 @@ describe("syncBookingMeet", () => {
 
   it("never throws when Google fails, and the next save tries again", async () => {
     m.create.mockRejectedValueOnce(new Error("Google Calendar 503"));
-    await expect(sync(consult())).resolves.toBeUndefined();
+    await expect(sync(consult())).resolves.toBeNull();
     expect(m.rows.get("b1").meet).toBeUndefined();
     await sync(m.rows.get("b1"));
     expect(m.rows.get("b1").meet.eventId).toBe("ev1");

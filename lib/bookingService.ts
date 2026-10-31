@@ -391,7 +391,9 @@ export async function createBooking(
   // Side-effects for session 1 - identical for EVERY caller now.
   await ensureCustomerForAppointment(appointment);
   await maybeCreateInvoiceForAppointment({ appointment, actor: opts.actor });
-  await syncBookingMeet(appointment);
+  // On the returned booking too, so the booking form can show the link at once.
+  const meet = await syncBookingMeet(appointment);
+  if (meet) appointment.meet = meet;
 
   // ── Auto-generate follow-up sessions for multi-session courses ────────
   // When a course with totalSessions > 1 has a schedule (so many a week, or an
