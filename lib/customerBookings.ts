@@ -19,6 +19,8 @@ export type CustomerBooking = {
   amountDue: number | null;
   paymentReceived: boolean;
   payToken: string | null;
+  /** Google Meet link of an online consultation; the customer asks to join and is let in. */
+  meetLink: string | null;
   createdAt: string | null;
 };
 
@@ -27,7 +29,7 @@ export type CustomerBooking = {
 const BOOKING_FIELDS =
   "enquiryId name service typeOfappointment bookingKind status slot physioSlot doctor " +
   "sessionsCompleted totalSessions preferredReachOutTime quotedPrice " +
-  "paymentReceived paymentAmount recommendedServices packageOriginId payToken createdAt";
+  "paymentReceived paymentAmount recommendedServices packageOriginId payToken meet.link createdAt";
 
 // slot.date is a Date at UTC midnight and physioSlot.date a "YYYY-MM-DD"
 // string, which also parses as UTC midnight, so the UTC day is the booked day.
@@ -67,6 +69,7 @@ export function toCustomerBooking(doc: any): CustomerBooking {
     // Same rule as the public pay page: settled once nothing is due.
     paymentReceived: amountDue !== null ? amountDue <= 0 : doc.paymentReceived === true,
     payToken: cancelled ? null : doc.payToken ?? null,
+    meetLink: cancelled ? null : doc.meet?.link ?? null,
     createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : null,
   };
 }

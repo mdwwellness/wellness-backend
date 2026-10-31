@@ -251,6 +251,16 @@ const AppointmentBookingSchema = new Schema({
         index: true,
     },
 
+    // ── Online consultation video call (lib/bookingMeet.ts). Server-written:
+    //    an event on the clinic's Google Calendar with a Meet link, kept in
+    //    step with the slot. `start`/`end` are the times the event was set to.
+    meet: {
+        link: { type: String },
+        eventId: { type: String },
+        start: { type: String },
+        end: { type: String },
+    },
+
     // ── Funnel checkpoint - payment (patient → clinic) ──
     // Server-managed (see lib/payments.ts): paymentAmount is the running total
     // of `payments`, and paymentReceived means fully paid. Part-payments leave

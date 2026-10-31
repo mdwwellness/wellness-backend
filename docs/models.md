@@ -145,6 +145,7 @@ discriminates between them.
 | `slot.date` | Date | The booked date. **Type is Date but the frontend sends `"YYYY-MM-DD"` strings — Mongoose coerces.** |
 | `slot.time` | String | E.g. `"11:30"`, 24h |
 | `therapyStartTime`, `therapyEndTime` | String | Free-text time strings for in-progress sessions |
+| `meet.link`, `meet.eventId`, `meet.start`, `meet.end` | String | Server-written video call of an online consultation (Google Meet on the clinic calendar, `lib/bookingMeet.ts`). `start`/`end` are the ISO times the event is set to. |
 
 ### Therapist assignment
 

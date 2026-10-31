@@ -28,6 +28,7 @@ import { addonCataloguePrice, applyLockedFields, stripServerOwned } from "../lib
 import { addonSessions, checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
 import { addonKey, courseSessionOf, isAssignedTherapist, mayActOnBooking, moneyRowFor, recordPayment, unpaidBeforeComplete } from "../lib/payments.ts";
 import { referrerForCode } from "../lib/referralCode.ts";
+import { dropBookingMeet, syncBookingMeet } from "../lib/bookingMeet.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
 import { withVisitStatus } from "../lib/visitStatus.ts";
@@ -153,6 +154,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
                 message: "Appointment not found",
             });
         }
+        await dropBookingMeet(deleted);
 
         return res.status(200).send({
             success: true,
@@ -1113,6 +1115,8 @@ export const updateAppointment = async (req: Request, res: Response) => {
             email: user?.userEmail,
         };
         await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
+        // Waited on so the dashboard's refetch already shows the call link.
+        await syncBookingMeet(updated);
 
         return res.status(200).send({
             success: true,

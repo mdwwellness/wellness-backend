@@ -62,6 +62,7 @@ describe("toCustomerBooking", () => {
         "enquiryId",
         "patientName",
         "payToken",
+        "meetLink",
         "paymentReceived",
         "preferredReachOutTime",
         "service",
@@ -88,6 +89,7 @@ describe("toCustomerBooking", () => {
       amountDue: 6000,
       paymentReceived: false,
       payToken: "a".repeat(32),
+      meetLink: null,
       createdAt: "2026-10-01T08:00:00.000Z",
     });
   });
@@ -128,6 +130,7 @@ describe("toCustomerBooking", () => {
       amountDue: null,
       paymentReceived: false,
       payToken: null,
+      meetLink: null,
       createdAt: null,
     });
   });

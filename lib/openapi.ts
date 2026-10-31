@@ -391,6 +391,7 @@ export const openapiSpec = {
           amountDue: { type: "number", nullable: true, description: "null = nothing payable on this row" },
           paymentReceived: { type: "boolean" },
           payToken: { type: "string", nullable: true },
+          meetLink: { type: "string", nullable: true, description: "Google Meet link of an online consultation once its time is confirmed; null otherwise" },
           createdAt: { type: "string", nullable: true },
         },
       },

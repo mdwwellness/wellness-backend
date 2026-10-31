@@ -18,7 +18,8 @@ const blank = (v: unknown) => v === undefined || v === null || v === "";
  * Fields only the server writes, removed from every client create and update
  * whatever the role (ISSUES #48): visit and add-on codes, money (payments go
  * through lib/payments.ts, discounts through offers), the split and payouts
- * (lib/payouts.ts), session progress and the links between visits.
+ * (lib/payouts.ts), session progress, the links between visits and the video
+ * call (lib/bookingMeet.ts).
  */
 const SERVER_OWNED = [
   "visitOtpHash", "visitOtpExpiresAt", "visitOtpVerified", "visitOtpAttempts", "visitOtpSentAt", "visitOtpSentBy", "visitOtpVerifiedAt",
@@ -27,6 +28,7 @@ const SERVER_OWNED = [
   "discountAmount", "discountType", "discountCode", "promoCode", "appliedOffers",
   "therapistSplitPercent", "therapistPaid", "therapistPaidAt", "therapistPayouts",
   "sessionNotes", "sessionsCompleted", "packageOriginId", "addonOf",
+  "meet",
 ];
 
 export function stripServerOwned(input: Record<string, unknown>): void {

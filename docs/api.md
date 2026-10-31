@@ -496,8 +496,14 @@ Request: any subset of the [AppointmentBooking](models.md#appointmentbooking)
 fields. A key starting with `$` or containing `.` is refused (`400`). Money and
 server-owned fields are ignored: payments, discounts, the split, payouts
 (`therapistPaid`, `therapistPayouts`), add-ons, offers and session counts each
-have their own endpoint. `activityLog` only gains entries. A completed visit's
-therapist can't be changed. Example funnel-stage advance:
+have their own endpoint. `meet` (the video call) is server-written too: an
+online consultation (`typeOfappointment: "consultation"`, an intake) that is
+`scheduled` or `ongoing` with a slot gets a Google Meet link on the clinic's
+calendar, moved when its slot moves and removed when it is cancelled, deleted
+or stops being a consultation (`lib/bookingMeet.ts`; needs `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`). `activityLog` only gains
+entries. A completed visit's therapist can't be changed. Example funnel-stage
+advance:
 
 ```jsonc
 {
@@ -795,6 +801,7 @@ Success response:
       "amountDue": 1500,                           // null when nothing is payable on this row (see below)
       "paymentReceived": false,
       "payToken": "3f9c...",                       // payment page: /pay/<payToken>; null on cancelled rows
+      "meetLink": null,                            // online consultation video call, see below
       "createdAt": "2026-10-01T09:12:44.000Z"
     }
   ]
@@ -811,6 +818,11 @@ Success response:
 - `paymentReceived`: `true` once `amountDue` is 0. When `amountDue` is `null`
   it is the stored flag, which is `false` for a new enquiry and for course
   follow-up rows (their payment is recorded on the first row).
+
+- `meetLink`: the Google Meet link of an online consultation, set once the
+  clinic confirms its time (null before that, on other bookings, and on
+  cancelled rows). The customer opens it and taps "Ask to join"; the clinic or
+  therapist lets them in. Show it as a "Join video call" button.
 
 Use `amountDue > 0` to decide whether a row is payable, and `amountDue === 0`
 to show "Paid".
