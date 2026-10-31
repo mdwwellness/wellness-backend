@@ -15,6 +15,7 @@ import {
   updateAppointment,
   getTherapistSessionCounts,
   addPayment,
+  addPayout,
 } from "../controllers/appointmentController.ts";
 import userAuth from "../middlewares/userAuth.ts";
 import requireRole from "../middlewares/requireRole.ts";
@@ -37,6 +38,8 @@ appointmentRouter.get("/therapist-session-counts", userAuth, getTherapistSession
 appointmentRouter.post("/:id/pay-link", userAuth, createPaymentLink);
 // Money received (part or full); a therapist only on their own visit (checked in the handler).
 appointmentRouter.post("/:id/payments", userAuth, requireRole("SUPER_ADMIN", "ADMIN", "STAFF", "THERAPIST"), addPayment);
+// Paying a therapist out (or undoing it): the amount is worked out on the server.
+appointmentRouter.post("/:id/payout", userAuth, requireRole("SUPER_ADMIN", "ADMIN"), addPayout);
 appointmentRouter.post("/:id/recommendations", userAuth, addAppointmentRecommendation);
 appointmentRouter.post("/:id/recommendations/otp", userAuth, sendAddonOtp);
 appointmentRouter.post("/:id/recommendations/confirm", userAuth, confirmAppointmentRecommendation);

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { TherapistLeave } from "../models/therapistLeaveModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 import { mayActOnTherapist } from "../lib/payments.ts";
+import { canManageSplit } from "../lib/therapistSplit.ts";
 
 const notOwn = (res: Response) =>
   res.status(403).json({ success: false, message: "You can only change your own leave and days off." });
@@ -94,6 +95,7 @@ export async function updateWeekOffDays(req: Request, res: Response) {
     if (!doctor) {
       return res.status(404).json({ success: false, message: "Therapist not found" });
     }
+    if (!canManageSplit(req.user?.role)) doctor.splitPercent = undefined;
 
     return res.status(200).json({ success: true, data: doctor });
   } catch (error: any) {

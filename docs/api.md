@@ -459,11 +459,31 @@ Success response:
 {
   "success": true,
   "data": [
-    { /* AppointmentBooking record */ },
+    { /* AppointmentBooking record, plus visitStatus and payout */ },
     ...
   ]
 }
 ```
+
+Each record carries `payout`: what it earns per therapist, worked out by
+`lib/payouts.ts` (the dashboard never recomputes a cut). One entry per therapist
+(usually one): `{ doctorId, doctor, splitPercent?, sessions, earned, pending,
+upcoming, paidOut, owed }`, where each bucket is `{ revenue, therapistCut,
+companyCut }` and `pending` adds `due`. `splitPercent` is sent only to Admin /
+Super Admin, and a therapist gets only their own entry. `GET /api/therapist/:id`
+returns the same field.
+
+### POST `/api/appointments/:id/payout` (Admin / Super Admin)
+
+Pays a therapist what they're owed on this booking, or undoes it. The amount
+comes from the server; the split it was paid at is locked.
+
+```jsonc
+{ "doctorId": "THR-0004", "paid": true }   // false = undo what was paid
+```
+
+Errors: `400` nothing owed / nothing paid / no split set, `404` no earnings for
+that therapist, `409` someone changed it at the same time.
 
 ### PUT `/api/appointments/:id`
 
@@ -473,7 +493,11 @@ Update any subset of fields on a record. Used by the dashboard for:
 - Editing lead details
 
 Request: any subset of the [AppointmentBooking](models.md#appointmentbooking)
-fields. Example funnel-stage advance:
+fields. A key starting with `$` or containing `.` is refused (`400`). Money and
+server-owned fields are ignored: payments, discounts, the split, payouts
+(`therapistPaid`, `therapistPayouts`), add-ons, offers and session counts each
+have their own endpoint. `activityLog` only gains entries. A completed visit's
+therapist can't be changed. Example funnel-stage advance:
 
 ```jsonc
 {

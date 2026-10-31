@@ -29,6 +29,16 @@ const syncInvoice = (booking: any, user: any) =>
 const findAddon = (row: any, key: string | undefined) =>
   key ? (row?.recommendedServices ?? []).find((r: any) => addonKey(r.serviceId, r.recommendedAt) === key) : undefined;
 
+/**
+ * "Paid in full" follows the booking's new price (ISSUES #55): an offer down to
+ * exactly what was paid settles it, removing one after payment reopens it. An
+ * older row had only the flag, no amount, and stays paid.
+ */
+const paidFlags = (doc: any, price: number) => {
+  const full = (!!doc.paymentReceived && doc.paymentAmount == null) || (Number(doc.paymentAmount) || 0) >= price;
+  return { paymentReceived: full, ...(full && !doc.paymentReceived ? { paymentReceivedAt: new Date() } : {}) };
+};
+
 const lineEntry = (row: any, lineKind: string, key?: string) =>
   (row?.appliedOffers ?? []).find((a: any) =>
     a.lineKind === lineKind && (lineKind !== "add_on" || a.addonKey === key),
@@ -174,16 +184,17 @@ export const applyOffer = async (req: Request, res: Response) => {
       ? await AppointmentBooking.findOneAndUpdate(
           {
             _id: doc._id,
-            recommendedServices: { $elemMatch: { serviceId: addon.serviceId, recommendedAt: addon.recommendedAt } },
+            // The amount paid too, so a payment landing in between can't leave the flag stale.
+            recommendedServices: { $elemMatch: { serviceId: addon.serviceId, recommendedAt: addon.recommendedAt, paidAmount: addon.paidAmount ?? null } },
           },
           {
-            $set: { "recommendedServices.$.quotedPrice": money.final },
+            $set: { "recommendedServices.$.quotedPrice": money.final, "recommendedServices.$.paymentCollected": addonPaid(addon) >= money.final },
             $push: { appliedOffers: entry, activityLog: { at: nowIso, userId: String(user?._id ?? ""), name: userLabel(user), action: logAction } },
           },
           { new: true },
         ).exec()
       : await AppointmentBooking.findOneAndUpdate(
-          { _id: doc._id, quotedPrice: doc.quotedPrice ?? null },
+          { _id: doc._id, quotedPrice: doc.quotedPrice ?? null, paymentAmount: doc.paymentAmount ?? null },
           {
             $set: {
               originalPrice: base,
@@ -191,6 +202,7 @@ export const applyOffer = async (req: Request, res: Response) => {
               discountAmount: money.off,
               discountType: offer.kind,
               discountCode: offer.code || offer.name,
+              ...paidFlags(doc, money.final),
             },
             $push: { appliedOffers: entry, activityLog: { at: nowIso, userId: String(user?._id ?? ""), name: userLabel(user), action: logAction } },
           },
@@ -233,14 +245,14 @@ export const removeOffer = async (req: Request, res: Response) => {
       const addon = findAddon(doc, aKey);
       if (!addon) return res.status(404).send({ success: false, message: "Add-on not found on this booking." });
       updated = await AppointmentBooking.findOneAndUpdate(
-        { _id: doc._id, recommendedServices: { $elemMatch: { serviceId: addon.serviceId, recommendedAt: addon.recommendedAt } } },
-        { $set: { "recommendedServices.$.quotedPrice": entry.base }, $pull: { appliedOffers: { offerId: entry.offerId, addonKey: aKey } }, $push: { activityLog: log } },
+        { _id: doc._id, recommendedServices: { $elemMatch: { serviceId: addon.serviceId, recommendedAt: addon.recommendedAt, paidAmount: addon.paidAmount ?? null } } },
+        { $set: { "recommendedServices.$.quotedPrice": entry.base, "recommendedServices.$.paymentCollected": addonPaid(addon) >= entry.base }, $pull: { appliedOffers: { offerId: entry.offerId, addonKey: aKey } }, $push: { activityLog: log } },
         { new: true },
       ).exec();
     } else {
       const isCourse = doc.bookingKind === "course";
       updated = await AppointmentBooking.findOneAndUpdate(
-        { _id: doc._id },
+        { _id: doc._id, paymentAmount: doc.paymentAmount ?? null },
         {
           $set: {
             quotedPrice: entry.base,
@@ -248,6 +260,7 @@ export const removeOffer = async (req: Request, res: Response) => {
             discountAmount: 0,
             discountType: "fixed",
             discountCode: undefined,
+            ...paidFlags(doc, entry.base),
           },
           $pull: { appliedOffers: { offerId: entry.offerId, lineKind: "main" } },
           $push: { activityLog: log },
@@ -256,6 +269,7 @@ export const removeOffer = async (req: Request, res: Response) => {
       ).exec();
     }
 
+    if (!updated) return res.status(409).send({ success: false, message: "The booking just changed - refresh and try again." });
     await releaseOffer(entry.offerId); // free the redemption
     await syncInvoice(updated, user);
     logger.info("Offer removed", { bookingId: String(doc._id), offerId: entry.offerId });

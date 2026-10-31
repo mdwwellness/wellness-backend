@@ -61,6 +61,20 @@ describe("offers reach the invoice (ISSUES #42)", () => {
   });
 });
 
+describe("paid in full follows the new price (ISSUES #55)", () => {
+  it("an offer down to exactly what was paid settles the booking, and removing it reopens it", async () => {
+    m.booking.paymentAmount = 540;
+    m.booking.paymentReceived = false;
+    await applyOffer(req({ offerId: "o1" }), res());
+    expect(m.booking).toMatchObject({ quotedPrice: 540, paymentReceived: true });
+
+    const r = res();
+    await removeOffer(req({ lineKind: "main" }), r);
+    expect(r.code).toBe(200);
+    expect(m.booking).toMatchObject({ quotedPrice: 600, paymentReceived: false });
+  });
+});
+
 describe("a once-per-phone offer used before", () => {
   beforeEach(() => {
     OFFER.oncePerPhone = true;

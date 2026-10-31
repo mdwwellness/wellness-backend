@@ -1,12 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockFindOne } = vi.hoisted(() => ({ mockFindOne: vi.fn() }));
+const { mockFindOne, mockRateFindOne } = vi.hoisted(() => ({ mockFindOne: vi.fn(), mockRateFindOne: vi.fn() }));
 vi.mock("../models/serviceModel.ts", () => ({ default: { findOne: mockFindOne } }));
+vi.mock("../models/sessionRateModel.ts", () => ({ default: { findOne: mockRateFindOne } }));
 vi.mock("./invoiceGeneration.ts", () => ({
   BOOKING_TYPE_SERVICE: { consultation: "Online Consultation", appointment: "Home Visit Consultation" },
 }));
 
-import { applyLockedFields } from "./lockedFields.ts";
+import { addonCataloguePrice, applyLockedFields } from "./lockedFields.ts";
+
+// KEEP IN SYNC with the dashboard's service-pricing.test.ts (recommendedAddonTotal).
+describe("addonCataloguePrice (ISSUES #58)", () => {
+  beforeEach(() => {
+    mockFindOne.mockReturnValue({ lean: () => Promise.resolve({ name: "Cupping", originalPrice: 800, discountedPrice: 600 }) });
+    mockRateFindOne.mockReturnValue({ lean: () => Promise.resolve({ tiers: [{ from: 1, to: 5, rate: 1000 }, { from: 6, to: null, rate: 900 }] }) });
+  });
+
+  it("one session: the discounted price unless the therapist unticks it", async () => {
+    expect(await addonCataloguePrice("S1", undefined, true)).toEqual({ name: "Cupping", price: 600 });
+    expect(await addonCataloguePrice("S1", 1, false)).toEqual({ name: "Cupping", price: 800 });
+  });
+
+  it("several sessions: the session-rate tier × count, whatever the client says", async () => {
+    expect((await addonCataloguePrice("S1", 3, true))?.price).toBe(3000);
+    expect((await addonCataloguePrice("S1", 8, true))?.price).toBe(7200);
+  });
+
+  it("an unknown service has no price", async () => {
+    mockFindOne.mockReturnValue({ lean: () => Promise.resolve(null) });
+    expect(await addonCataloguePrice("nope", 1, true)).toBeUndefined();
+  });
+});
 
 const prices: Record<string, number> = { "online consultation": 600, "home visit consultation": 1600 };
 

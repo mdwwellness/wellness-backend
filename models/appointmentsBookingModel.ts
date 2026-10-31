@@ -290,6 +290,17 @@ const AppointmentBookingSchema = new Schema({
     therapistPaidAt: {
         type: Date,
     },
+    // What was actually paid out, per therapist (append-only; an undo is a
+    // negative entry). Older rows only have the therapistPaid tick (lib/payouts.ts).
+    therapistPayouts: [
+        {
+            _id: false,
+            doctorId: { type: String },
+            amount: { type: Number },
+            at: { type: Date },
+            by: { type: String },
+        },
+    ],
 
     // ── Per-visit proof-of-presence OTP ──
     // Set on "send", consumed+cleared by completeSession, so every session in a
@@ -330,6 +341,10 @@ const AppointmentBookingSchema = new Schema({
             at: { type: String },
             note: { type: String, default: "" },
             therapist: { type: String, default: "" },
+            // Who did this session and at what split, so a package that changes
+            // hands pays each session to its own therapist (lib/payouts.ts).
+            doctorId: { type: String },
+            splitPercent: { type: Number },
             by: { type: String, default: "" },
             // What was recorded for this visit: Service performed ticked, and
             // when the customer's code was verified.

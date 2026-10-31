@@ -143,10 +143,10 @@ export function shortBeforeStart(visitRow: any, moneyRow: any): number {
     const addon = findAddon(moneyRow, visitRow.addonOf.key);
     if (!addon) own = 0;
     else {
-      const needed = Math.min(
-        Number(addon.quotedPrice) || 0,
-        addonPerSession(addon) * (Number(visitRow.addonOf.session) || 1),
-      );
+      // Every session up to this one, rounded once (the last needs the full
+      // price), the same way lib/payouts.ts counts a session as paid.
+      const price = Number(addon.quotedPrice) || 0;
+      const needed = Math.round((price * (Number(visitRow.addonOf.session) || 1)) / (Number(addon.sessions) || 1));
       own = Math.max(0, needed - addonPaid(addon));
     }
   } else {

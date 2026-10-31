@@ -24,13 +24,14 @@ import {
 } from "../lib/bookingSource.ts";
 import { payableLedger } from "../lib/bookingMoney.ts";
 import { lockedSplitFields } from "../lib/therapistSplit.ts";
-import { applyLockedFields } from "../lib/lockedFields.ts";
-import { checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
+import { addonCataloguePrice, applyLockedFields, stripServerOwned } from "../lib/lockedFields.ts";
+import { addonSessions, checkAddonSchedule, createAddonVisits } from "../lib/addonVisits.ts";
 import { addonKey, courseSessionOf, isAssignedTherapist, mayActOnBooking, moneyRowFor, recordPayment, unpaidBeforeComplete } from "../lib/payments.ts";
 import { referrerForCode } from "../lib/referralCode.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
 import { withVisitStatus } from "../lib/visitStatus.ts";
+import { legacyTick, recordPayout, withPayouts } from "../lib/payouts.ts";
 
 // Back-office roles that see every appointment / enquiry record.
 // THERAPIST is intentionally NOT in this set - therapists see only their
@@ -94,6 +95,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
         const userId = (req.user as any)?.id ?? (req.user as any)?._id;
 
         let appointmentdetails: any[] = [];
+        let viewerDoctorId: string | null = null;
 
         if (role && BACK_OFFICE_ROLES.has(role)) {
             // Back-office staff (SUPER_ADMIN, ADMIN, STAFF, CUSTOMER_CARE)
@@ -111,6 +113,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
             const isExistingDoctor = await Doctor.findOne(doctorQuery).exec();
             if (isExistingDoctor) {
                 const doctorId = isExistingDoctor.doctorId;
+                viewerDoctorId = doctorId ?? null;
                 appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId })
                     .select(HIDDEN_FROM_THERAPISTS)
                     .sort({ createdAt: -1 });
@@ -126,8 +129,9 @@ export const getAllAppointments = async (req: Request, res: Response) => {
 
         return res.status(200).send({
             success: true,
-            // Each with its list status, the same for every viewer (lib/visitStatus.ts).
-            data: await withVisitStatus(appointmentdetails),
+            // Each with its list status, the same for every viewer (lib/visitStatus.ts),
+            // and what it earns (lib/payouts.ts).
+            data: await withPayouts(await withVisitStatus(appointmentdetails), { role, doctorId: viewerDoctorId }),
         });
     } catch (error: any) {
         console.error("Error fetching details:", error);
@@ -165,7 +169,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 export const addAppointmentRecommendation = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { serviceId, serviceName, category, quotedPrice, sessions, slot, durationMin, intervalDays } = req.body ?? {};
+        const { serviceId, category, sessions, slot, durationMin, intervalDays, applyDiscount } = req.body ?? {};
 
         if (!serviceId || typeof serviceId !== "string") {
             return res.status(400).send({
@@ -173,17 +177,9 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
                 message: "serviceId is required.",
             });
         }
-        if (!serviceName || typeof serviceName !== "string") {
-            return res.status(400).send({
-                success: false,
-                message: "serviceName is required.",
-            });
-        }
-        if (quotedPrice == null || typeof quotedPrice !== "number" || quotedPrice < 0) {
-            return res.status(400).send({
-                success: false,
-                message: "quotedPrice is required and must be a non-negative number.",
-            });
+        // One number, used for the price, the schedule and what's stored alike.
+        if (sessions !== undefined && !(Number.isInteger(sessions) && sessions >= 1)) {
+            return res.status(400).send({ success: false, message: "Sessions must be a whole number." });
         }
 
         const appointment = await AppointmentBooking.findById(id).exec();
@@ -204,6 +200,17 @@ export const addAppointmentRecommendation = async (req: Request, res: Response) 
                     "Cannot add recommendations to a legacy recommended row. Open the parent appointment instead.",
             });
         }
+
+        // Priced from the catalogue, never the client (ISSUES #58); the discount
+        // is the therapist's call, on unless they untick it.
+        const priced = await addonCataloguePrice(serviceId, sessions, applyDiscount !== false);
+        if (!priced) {
+            return res.status(404).send({ success: false, message: "That service isn't in the catalogue." });
+        }
+        if (!(priced.price > 0)) {
+            return res.status(400).send({ success: false, message: `${priced.name} has no price for ${Number(sessions) > 1 ? `${sessions} sessions` : "one session"} yet.` });
+        }
+        const { name: serviceName, price: quotedPrice } = priced;
 
         // When it will be done, always by this booking's therapist; no clashes.
         const schedule = await checkAddonSchedule(appointment, {
@@ -396,6 +403,10 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
                     [`${path}.status`]: "confirmed",
                     [`${path}.confirmedAt`]: confirmedAt,
                     [`${path}.confirmedBy`]: actorName,
+                    // Done in this visit only if it's still open now. Once it's
+                    // finished, createAddonVisits gives the first session its own
+                    // visit, so the visit itself must not count it too.
+                    ...(recs[idx].slot?.date ? { [`${path}.firstInVisit`]: addonSessions(recs[idx], appointment)[0].inVisit } : {}),
                     // Consume the code so it can't confirm a second add-on.
                     addonOtpHash: null,
                     addonOtpExpiresAt: null,
@@ -503,6 +514,20 @@ export const addPayment = async (req: Request, res: Response) => {
     return res.status(200).send({ success: true, message: "Payment recorded", data: result.booking });
   } catch (error: any) {
     console.error("[addPayment]", error);
+    return res.status(500).send({ success: false, message: "Server error" });
+  }
+};
+
+/** Mark a therapist's payout on a booking paid, or undo it (Admin / Super Admin, see the route). */
+export const addPayout = async (req: Request, res: Response) => {
+  try {
+    const row = await AppointmentBooking.findById(req.params.id).exec();
+    if (!row) return res.status(404).send({ success: false, message: "Appointment not found" });
+    const result = await recordPayout({ row, doctorId: req.body?.doctorId, paid: req.body?.paid, user: req.user as any });
+    if (!result.ok) return res.status(result.code).send({ success: false, message: result.message });
+    return res.status(200).send({ success: true, message: req.body?.paid === true ? "Payout recorded" : "Payout undone" });
+  } catch (error: any) {
+    console.error("[addPayout]", error);
     return res.status(500).send({ success: false, message: "Server error" });
   }
 };
@@ -727,6 +752,8 @@ export const completeSession = async (req: Request, res: Response) => {
                         at: new Date().toISOString(),
                         note: sessionNote,
                         therapist: existing.doctor ?? "",
+                        doctorId: existing.doctorId ?? "",
+                        splitPercent: existing.therapistSplitPercent ?? splitLock.therapistSplitPercent ?? null,
                         by: actorName,
                         performed,
                         verifiedAt: existing.visitOtpVerifiedAt ?? undefined,
@@ -801,36 +828,23 @@ export const updateAppointment = async (req: Request, res: Response) => {
         const { id } = req.params;
         const updateData = { ...req.body };
 
-        // Server-managed fields are owned by the visit-OTP + complete-session
-        // endpoints and are NEVER settable via a client update. The work checklist
+        // A Mongo operator ($set, $inc...) or a dotted path would carry any field
+        // past every check below (ISSUES #48). The dashboard sends neither.
+        if (Object.keys(updateData).some((k) => k.startsWith("$") || k.includes("."))) {
+            return res.status(400).send({ success: false, message: "Invalid update." });
+        }
+
+        // Server-owned fields (OTPs, money, the split and payouts, offers, session
+        // progress, visit links) are never settable here. The work checklist
         // echoes the WHOLE draft on every checkbox save, so without this a stale
-        // draft silently clobbers them - notably undoing a fresh OTP verification
-        // (which then wrongly blocked checkout).
-        delete (updateData as any).visitOtpHash;
-        delete (updateData as any).visitOtpExpiresAt;
-        delete (updateData as any).visitOtpVerified;
-        delete (updateData as any).visitOtpAttempts;
-        delete (updateData as any).visitOtpSentAt;
-        delete (updateData as any).visitOtpSentBy;
-        delete (updateData as any).visitOtpVerifiedAt;
-        delete (updateData as any).addonOtpHash;
-        delete (updateData as any).addonOtpExpiresAt;
-        delete (updateData as any).addonOtpTarget;
-        delete (updateData as any).sessionNotes;
-        // Locked in by the server at completion (below / completeSession) only;
-        // otherwise a therapist could raise their own cut on a booking.
-        delete (updateData as any).therapistSplitPercent;
-        // Money only moves through POST /:id/payments (lib/payments.ts), so a
-        // stale draft can't overwrite or undo a recorded payment.
-        delete (updateData as any).paymentReceived;
-        delete (updateData as any).paymentAmount;
-        delete (updateData as any).paymentReceivedAt;
-        delete (updateData as any).paymentMethod;
-        delete (updateData as any).payments;
-        // No manual discounts: the price comes from the catalogue only.
-        delete (updateData as any).discountAmount;
-        delete (updateData as any).discountType;
-        delete (updateData as any).promoCode;
+        // draft would also clobber them.
+        stripServerOwned(updateData);
+        // Set when the booking is made: add-ons have their own endpoints, and a
+        // booking's shape (course length, which session this is) never changes
+        // by hand, or a visit could be pointed at another booking's money.
+        for (const f of ["recommendedServices", "bookingKind", "totalSessions", "sessionNumber", "sessionIntervalDays", "sessionsPerWeek"]) {
+            delete (updateData as any)[f];
+        }
         // Gender is one of a fixed few, and the update below skips schema checks.
         const gender = toGender(updateData.gender);
         if (gender) updateData.gender = gender;
@@ -847,6 +861,17 @@ export const updateAppointment = async (req: Request, res: Response) => {
             return res.status(403).send({ success: false, message: "This visit isn't assigned to you." });
         }
         const cur = current as any;
+
+        // History is append-only: keep every stored entry and add only the new
+        // ones sent (clients echo the whole log), so a PUT can't rewrite it.
+        if (Array.isArray(updateData.activityLog)) {
+            const stored = cur.activityLog ?? [];
+            const key = (e: any) => `${e?.at}|${e?.action}`;
+            const seen = new Set(stored.map(key));
+            updateData.activityLog = [...stored, ...updateData.activityLog.filter((e: any) => !seen.has(key(e)))];
+        } else {
+            delete updateData.activityLog;
+        }
 
         // Customer details and the intake price can't be edited by hand.
         try {
@@ -934,6 +959,30 @@ export const updateAppointment = async (req: Request, res: Response) => {
                 success: false,
                 message: "Reassigning the therapist needs a reason.",
             });
+        }
+        // A finished visit was done by its therapist, and earns for them (#56).
+        if (changingTherapist && cur.status === "completed") {
+            return res.status(400).send({
+                success: false,
+                message: "This visit is done, so its therapist can't be changed.",
+            });
+        }
+        // The next session locks in the new therapist's split, not the old one's.
+        // Sessions already done stay with whoever did them: notes from before
+        // they were stamped get the old therapist now, and an older "paid" tick
+        // moves into the payout ledger under them (lib/payouts.ts).
+        if (changingTherapist) {
+            updateData.therapistSplitPercent = null;
+            const notes = (cur.sessionNotes ?? []).map((s: any) => (typeof s?.toObject === "function" ? s.toObject() : s));
+            if (notes.some((s: any) => !s.doctorId)) {
+                updateData.sessionNotes = notes.map((s: any) =>
+                    s.doctorId ? s : { ...s, doctorId: cur.doctorId ?? "", splitPercent: cur.therapistSplitPercent ?? undefined });
+            }
+            const oldSplit = cur.doctorId
+                ? (await Doctor.findOne({ doctorId: cur.doctorId }, { splitPercent: 1 }).lean() as any)?.splitPercent
+                : undefined;
+            const tick = legacyTick(cur, oldSplit);
+            if (tick && tick.amount > 0) updateData.therapistPayouts = [{ ...tick, at: cur.therapistPaidAt ?? new Date(), by: "" }];
         }
 
         // A therapist can be assigned before any payment; money is collected
@@ -1030,10 +1079,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
 
         if (reason && !updateData.statusNote) updateData.statusNote = reason;
         if (entries.length) {
-            const base = Array.isArray(updateData.activityLog)
-                ? updateData.activityLog
-                : (cur.activityLog ?? []);
-            updateData.activityLog = [...base, ...entries];
+            updateData.activityLog = [...(updateData.activityLog ?? cur.activityLog ?? []), ...entries];
         }
 
         const updated = await AppointmentBooking.findByIdAndUpdate(id, updateData, {

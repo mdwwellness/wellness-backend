@@ -125,6 +125,94 @@ describe("updateAppointment - lead lock", () => {
   });
 });
 
+describe("updateAppointment - money fields can't be smuggled in (ISSUES #48)", () => {
+  const put = (role: string, body: object) =>
+    ({ params: { id: "a1" }, body, user: { _id: "t1", role } }) as unknown as Request;
+  const written = () => mockFindOneAndUpdate.mock.calls.at(-1)?.[1];
+
+  beforeEach(() => {
+    appt = {
+      _id: "a1", doctorId: "THR-1", therapistPaid: true,
+      activityLog: [{ at: "2026-10-01T10:00:00.000Z", userId: "a", name: "Admin", action: "Therapist reassigned" }],
+    };
+  });
+
+  it("refuses a Mongo operator or a dotted path", async () => {
+    for (const body of [
+      { status: "ongoing", $set: { therapistSplitPercent: 100 } },
+      { $inc: { paymentAmount: 5000 } },
+      { "recommendedServices.0.paidAmount": 5000 },
+    ]) {
+      const r = res();
+      await updateAppointment(put("THERAPIST", body), r);
+      expect(r.status).toHaveBeenCalledWith(400);
+    }
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a therapist can't un-mark their payout or rewrite add-ons, offers or session counts", async () => {
+    const r = res();
+    await updateAppointment(put("THERAPIST", {
+      status: "ongoing", therapistPaid: false, therapistPaidAt: null,
+      recommendedServices: [{ paidAmount: 9999 }], appliedOffers: [], sessionsCompleted: 5, discountCode: "X",
+    }), r);
+    expect(r.status).toHaveBeenCalledWith(200);
+    for (const f of ["therapistPaid", "therapistPaidAt", "recommendedServices", "appliedOffers", "sessionsCompleted", "discountCode"]) {
+      expect(written()).not.toHaveProperty(f);
+    }
+  });
+
+  it("not even an admin marks a payout through the PUT (it has its own endpoint)", async () => {
+    const r = res();
+    await updateAppointment(put("ADMIN", { therapistPaid: false, therapistPayouts: [] }), r);
+    expect(written()).not.toHaveProperty("therapistPaid");
+    expect(written()).not.toHaveProperty("therapistPayouts");
+  });
+
+  it("a visit can't be pointed at another booking's money, and a therapist can't mark it completed by hand", async () => {
+    const r = res();
+    await updateAppointment(put("THERAPIST", {
+      packageOriginId: "other", sessionNumber: 3, addonOf: { bookingId: "other" }, bookingKind: "course", totalSessions: 9, status: "completed",
+    }), r);
+    for (const f of ["packageOriginId", "sessionNumber", "addonOf", "bookingKind", "totalSessions", "status"]) {
+      expect(written()).not.toHaveProperty(f);
+    }
+  });
+
+  it("reassigning keeps done sessions and an older paid tick with the therapist who did them", async () => {
+    appt.status = "scheduled";
+    appt.quotedPrice = 4000;
+    appt.therapistSplitPercent = 50;
+    appt.therapistPaidAt = "2026-10-01T10:00:00.000Z";
+    appt.sessionNotes = [{ session: 1, therapist: "Asha", at: "2026-10-01T09:00:00.000Z" }];
+    const r = res();
+    await updateAppointment(put("ADMIN", { doctorId: "THR-2" }), r);
+    expect(written().sessionNotes).toEqual([expect.objectContaining({ session: 1, doctorId: "THR-1", splitPercent: 50 })]);
+    expect(written().therapistPayouts).toEqual([expect.objectContaining({ doctorId: "THR-1", amount: 2000 })]);
+  });
+
+  it("a finished visit keeps its therapist; reassigning an open one clears the old split", async () => {
+    appt.status = "completed";
+    let r = res();
+    await updateAppointment(put("ADMIN", { doctorId: "THR-2" }), r);
+    expect(r.status).toHaveBeenCalledWith(400);
+
+    appt.status = "scheduled";
+    appt.therapistSplitPercent = 60;
+    r = res();
+    await updateAppointment(put("ADMIN", { doctorId: "THR-2" }), r);
+    expect(written()).toMatchObject({ doctorId: "THR-2", therapistSplitPercent: null });
+  });
+
+  it("history is append-only: stored entries survive, new ones are added", async () => {
+    const added = { at: "2026-10-30T10:00:00.000Z", userId: "t1", name: "T", action: "Arrived" };
+    const r = res();
+    // The client drops the stored entry and adds one.
+    await updateAppointment(put("THERAPIST", { status: "ongoing", activityLog: [added] }), r);
+    expect(written().activityLog).toEqual([appt.activityLog[0], added]);
+  });
+});
+
 describe("completeSession: the work is recorded first", () => {
   const done = (body: object, role = "THERAPIST") =>
     ({ params: { id: "a1" }, body, user: { _id: "u1", role, userEmail: "t@x.com" } }) as unknown as Request;

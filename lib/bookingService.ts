@@ -3,7 +3,7 @@ import ClinicSettings from "../models/clinicSettingsModel.ts";
 import { nextSequence } from "./counters.ts";
 import { logger } from "./logger.ts";
 import { resolveBookingSource } from "./bookingSource.ts";
-import { cataloguePrice, isIntake } from "./lockedFields.ts";
+import { cataloguePrice, isIntake, stripServerOwned } from "./lockedFields.ts";
 import { todayInIndia } from "./personDetails.ts";
 import {
   ensureCustomerForAppointment,
@@ -245,11 +245,12 @@ export async function createBooking(
   // Services catalogue, never the client.
   // ponytail: course prices are still computed client-side from the rate table.
   input = { ...input };
+  // Money taken at booking (recorded below); then every server-owned field goes.
+  const paidAtBooking = Number(input.paymentAmount) || 0;
+  const methodAtBooking = input.paymentMethod;
+  stripServerOwned(input);
   // Only 1-4 a week is stored; anything else is dropped, not a failed save.
   input.sessionsPerWeek = courseScheduleOf(input)?.perWeek || undefined;
-  delete input.discountAmount;
-  delete input.discountType;
-  delete input.promoCode;
   delete input.originalPrice;
   if (input.typeOfappointment && isIntake(input)) {
     const fee = await cataloguePrice(input.typeOfappointment);
@@ -259,19 +260,16 @@ export async function createBooking(
   // Money taken at booking becomes the first entry in `payments` (part-payment
   // allowed, never above the price). Later money goes through lib/payments.ts.
   const price = Number(input.quotedPrice) || 0;
-  const firstPayment = Math.min(Number(input.paymentAmount) || 0, price);
-  delete input.paymentAmount;
-  delete input.paymentReceived;
-  delete input.paymentReceivedAt;
-  delete input.payments;
+  const firstPayment = Math.min(paidAtBooking, price);
   const paymentFields =
     firstPayment > 0
       ? {
           paymentAmount: firstPayment,
+          paymentMethod: methodAtBooking,
           paymentReceived: firstPayment >= price,
           ...(firstPayment >= price ? { paymentReceivedAt: new Date() } : {}),
           payments: [
-            { amount: firstPayment, method: input.paymentMethod, at: new Date(), by: opts.actor?.name ?? "", byRole: "" },
+            { amount: firstPayment, method: methodAtBooking, at: new Date(), by: opts.actor?.name ?? "", byRole: "" },
           ],
         }
       : {};
@@ -380,8 +378,6 @@ export async function createBooking(
     customer_id: undefined,
     // After ...input on purpose, so a client-sent referredByName can't stick.
     ...sourceFields,
-    // Locked in by the server when the booking completes, never client-sent.
-    therapistSplitPercent: undefined,
     ...paymentFields,
   });
   await appointment.save();

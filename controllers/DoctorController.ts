@@ -12,6 +12,7 @@ import { parseProfileLink } from "../lib/profileLink.ts";
 import { withUniqueReferralCode } from "../lib/referralCode.ts";
 import { mayActOnTherapist, ownDoctorId } from "../lib/payments.ts";
 import { HIDDEN_FROM_THERAPISTS } from "../lib/bookingSource.ts";
+import { withPayouts } from "../lib/payouts.ts";
 
 /**
  * The splitPercent part of a therapist update. Profile saves echo the whole
@@ -151,6 +152,8 @@ export async function getDoctors(req: Request, res: Response) {
       const own = await ownDoctorId(req.user as any);
       for (const d of doctorsDetails) if (d.doctorId !== own) d.referralCode = undefined;
     }
+    // Splits are Admin / Super Admin only (ISSUES #58).
+    if (!canManageSplit(role)) for (const d of doctorsDetails) d.splitPercent = undefined;
     if (!doctorsDetails) {
       return res.status(404).send({
         success: false,
@@ -187,6 +190,7 @@ export async function getDoctorByUserId(req: Request, res: Response) {
         message: "Therapist profile not found for this user",
       });
     }
+    if (!canManageSplit(req.user?.role)) doctor.splitPercent = undefined;
     res.status(200).send({
       success: true,
       data: doctor,
@@ -213,14 +217,19 @@ export async function getPersonalAppointments(req: Request, res: Response) {
     if (!(await mayActOnTherapist(req.user as any, id))) {
       return res.status(403).send({ success: false, message: "You can only see your own visits." });
     }
-    const data = await AppointmentBookingModel.find({ doctorId: id })
+    // Also bookings that changed hands after this therapist did sessions on them
+    // (or was paid on them), so their earnings tab shows that money too.
+    const data = await AppointmentBookingModel.find({
+      $or: [{ doctorId: id }, { "sessionNotes.doctorId": id }, { "therapistPayouts.doctorId": id }],
+    })
       .select(req.user?.role === "THERAPIST" ? HIDDEN_FROM_THERAPISTS : "")
       .exec();
 
     return res.status(200).send({
       success: true,
       message: "Data retrived",
-      data: data
+      // With what each visit earns (lib/payouts.ts); a therapist here is this one.
+      data: await withPayouts(data, { role: req.user?.role, doctorId: String(id) }),
     })
 
   } catch (error: any) {
@@ -258,6 +267,7 @@ export async function updateDoctorDetails(req: Request, res: Response) {
     if (!updatedDoctor) {
       return res.status(404).json({ message: "Doctor not found" });
     }
+    if (!canManageSplit(req.user?.role)) updatedDoctor.splitPercent = undefined;
 
     return res.json({ message: "Doctor updated successfully", updatedDoctor });
   } catch (error) {
