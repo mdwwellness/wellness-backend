@@ -392,6 +392,7 @@ export const openapiSpec = {
           paymentReceived: { type: "boolean" },
           payToken: { type: "string", nullable: true },
           meetLink: { type: "string", nullable: true, description: "Google Meet link of an online consultation once its time is confirmed; null otherwise" },
+          calendarLink: { type: "string", nullable: true, description: "Google Calendar \"add event\" page for that call (adds it to the customer's own calendar); null when meetLink is null" },
           createdAt: { type: "string", nullable: true },
         },
       },

@@ -4,17 +4,55 @@
 // deleted. Every booking write path calls syncBookingMeet after it saves.
 //
 // Meetings are left at Google's default access ("Trusted"): the customer opens
-// the link and asks to join, and is only let in when admitted.
+// the link and asks to join, and is only let in when admitted. The event sits
+// on the clinic's calendar (all meetings) and the assigned therapist is its
+// one guest (their own meetings only), so both join without asking.
 
+import { createHash } from "node:crypto";
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
-import { createMeetEvent, deleteMeetEvent, googleMeetConfigured, moveMeetEvent } from "./googleMeet.ts";
+import { Doctor } from "../models/doctorsModel.ts";
+import { createMeetEvent, deleteMeetEvent, googleMeetConfigured, updateMeetEvent, type MeetEventDetails } from "./googleMeet.ts";
 import { isIntake } from "./lockedFields.ts";
 import { logger } from "./logger.ts";
 
 // When the visit has no end time.
 const DEFAULT_MINUTES = 30;
 
-type Meet = { link: string; eventId: string; start: string; end: string };
+// `details`: a hash of the text and guest last sent, to notice a new therapist
+// or name (a hash, so no email or name is copied onto the booking).
+type Meet = { link: string; eventId: string; start: string; end: string; details?: string };
+
+// ponytail: placeholder addresses get no invite (it would carry the customer's
+// name to a stranger's mail server). A mistyped real address still gets one.
+const PLACEHOLDER_EMAIL = /@(example\.(com|org|net)|test\.com)$|\.(test|example|invalid|localhost)$/i;
+
+function inviteEmail(email: unknown): string | null {
+  const e = typeof email === "string" ? email.trim().toLowerCase() : "";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && !PLACEHOLDER_EMAIL.test(e) ? e : null;
+}
+
+/** What the clinic's and the therapist's calendars show, and who is invited. */
+async function eventDetails(row: any, id: string): Promise<MeetEventDetails> {
+  const therapist: any = row.doctorId
+    ? await Doctor.findOne({ doctorId: row.doctorId }).select("name email").lean()
+    : null;
+  const therapistName = therapist?.name ?? row.doctor ?? "";
+  const guest = inviteEmail(therapist?.email);
+  return {
+    summary: `MDW Wellness consultation: ${row.name}${therapistName ? ` with ${therapistName}` : ""}`,
+    description: [
+      `Booking ID: ${row.enquiryId ?? id}`,
+      `Therapist: ${row.doctorId ? `${therapistName} (${row.doctorId})` : "Not assigned yet"}`,
+      `Customer: ${row.name}${row.customer_id ? ` (${row.customer_id})` : ""}`,
+      "",
+      'The customer taps "Ask to join". The clinic account or the therapist lets them in.',
+    ].join("\n"),
+    guests: guest ? [guest] : [],
+  };
+}
+
+const fingerprint = (d: MeetEventDetails) =>
+  createHash("sha256").update(JSON.stringify(d)).digest("hex").slice(0, 16);
 
 /** An online consultation intake, not a home visit or a course row. */
 function isOnlineConsult(row: any): boolean {
@@ -63,15 +101,12 @@ async function syncOnce(id: string): Promise<Meet | null> {
   if (!when) return meet; // a time we can't read: leave any link as it is
   const start = when.start.toISOString();
   const end = when.end.toISOString();
+  const details = await eventDetails(row, id);
+  const sent = fingerprint(details);
 
   if (!meet) {
-    const made = await createMeetEvent({
-      // No customer details: the event sits on the clinic's calendar.
-      summary: `MDW Wellness online consultation (${row.enquiryId ?? id})`,
-      start: when.start,
-      end: when.end,
-    });
-    const next = { link: made.meetLink, eventId: made.eventId, start, end };
+    const made = await createMeetEvent(details, when.start, when.end);
+    const next = { link: made.meetLink, eventId: made.eventId, start, end, details: sent };
     const saved = await AppointmentBooking.updateOne({ _id: id }, { $set: { meet: next } });
     // Deleted while Google was busy: don't leave the event behind.
     if (!saved.matchedCount) {
@@ -80,10 +115,15 @@ async function syncOnce(id: string): Promise<Meet | null> {
     }
     return next;
   }
-  if (meet.start !== start || meet.end !== end) {
-    await moveMeetEvent(meet.eventId, when.start, when.end);
-    await AppointmentBooking.updateOne({ _id: id }, { $set: { "meet.start": start, "meet.end": end } });
-    return { ...meet, start, end };
+  // A new time, therapist or name. Calls made before guests existed have no
+  // `details`, so their next save also invites the therapist.
+  if (meet.start !== start || meet.end !== end || meet.details !== sent) {
+    await updateMeetEvent(meet.eventId, details, when.start, when.end);
+    await AppointmentBooking.updateOne(
+      { _id: id },
+      { $set: { "meet.start": start, "meet.end": end, "meet.details": sent } },
+    );
+    return { ...meet, start, end, details: sent };
   }
   return meet;
 }

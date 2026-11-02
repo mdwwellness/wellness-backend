@@ -501,7 +501,10 @@ online consultation (`typeOfappointment: "consultation"`, an intake) that is
 `scheduled` or `ongoing` with a slot gets a Google Meet link on the clinic's
 calendar, moved when its slot moves and removed when it is cancelled, deleted
 or stops being a consultation (`lib/bookingMeet.ts`; needs `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`). `activityLog` only gains
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`). The event shows the booking
+ID, the therapist and the customer, and the assigned therapist's profile email
+is invited (Google emails them, and a reassigned visit swaps the invite).
+`activityLog` only gains
 entries. A completed visit's therapist can't be changed. Example funnel-stage
 advance:
 
@@ -802,6 +805,7 @@ Success response:
       "paymentReceived": false,
       "payToken": "3f9c...",                       // payment page: /pay/<payToken>; null on cancelled rows
       "meetLink": null,                            // online consultation video call, see below
+      "calendarLink": null,                        // "Add to calendar" page for that call, see below
       "createdAt": "2026-10-01T09:12:44.000Z"
     }
   ]
@@ -823,6 +827,10 @@ Success response:
   clinic confirms its time (null before that, on other bookings, and on
   cancelled rows). The customer opens it and taps "Ask to join"; the clinic or
   therapist lets them in. Show it as a "Join video call" button.
+- `calendarLink`: set together with `meetLink`. A Google Calendar "add event"
+  page with the call's time and link; it puts a copy on the customer's own
+  calendar (they are not a guest of the meeting, so they still ask to join).
+  Show it as an "Add to calendar" button that opens in the browser.
 
 Use `amountDue > 0` to decide whether a row is payable, and `amountDue === 0`
 to show "Paid".

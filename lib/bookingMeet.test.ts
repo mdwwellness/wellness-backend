@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const m = vi.hoisted(() => ({
   rows: new Map<string, any>(),
+  doctors: new Map<string, any>(),
   create: vi.fn(),
-  move: vi.fn(),
+  update: vi.fn(),
   del: vi.fn(),
   configured: true,
 }));
@@ -25,10 +26,15 @@ vi.mock("../models/appointmentsBookingModel.ts", () => ({
     },
   },
 }));
+vi.mock("../models/doctorsModel.ts", () => ({
+  Doctor: {
+    findOne: ({ doctorId }: any) => ({ select: () => ({ lean: async () => m.doctors.get(doctorId) ?? null }) }),
+  },
+}));
 vi.mock("./googleMeet.ts", () => ({
   googleMeetConfigured: () => m.configured,
   createMeetEvent: m.create,
-  moveMeetEvent: m.move,
+  updateMeetEvent: m.update,
   deleteMeetEvent: m.del,
 }));
 vi.mock("./invoiceGeneration.ts", () => ({ BOOKING_TYPE_SERVICE: {} }));
@@ -39,6 +45,9 @@ import { dropBookingMeet, syncBookingMeet, visitWindow } from "./bookingMeet.ts"
 const consult = (over: any = {}) => ({
   _id: "b1",
   enquiryId: "ENQ-0101",
+  name: "Asha Verma",
+  customer_id: "CUST-0074",
+  doctorId: "THR-0014",
   typeOfappointment: "consultation",
   bookingKind: "intake",
   status: "ongoing",
@@ -49,12 +58,17 @@ const consult = (over: any = {}) => ({
 });
 const put = (row: any) => (m.rows.set(row._id, row), row);
 const sync = (row: any) => syncBookingMeet(put(row));
+/** The details passed to Google on the nth create / update call. */
+const sentOn = (fn: any, n = 0) => fn.mock.calls[n][fn === m.create ? 0 : 1];
 
 beforeEach(() => {
   m.rows.clear();
+  m.doctors.clear();
+  m.doctors.set("THR-0014", { name: "Launch Therapist", email: " Riya@Gmail.com " });
+  m.doctors.set("THR-0020", { name: "Sanju Bag", email: "bagsanju71@gmail.com" });
   m.configured = true;
   m.create.mockReset().mockResolvedValue({ eventId: "ev1", meetLink: "https://meet.google.com/abc-defg-hij" });
-  m.move.mockReset().mockResolvedValue(undefined);
+  m.update.mockReset().mockResolvedValue(undefined);
   m.del.mockReset().mockResolvedValue(undefined);
 });
 
@@ -89,13 +103,68 @@ describe("syncBookingMeet", () => {
   it("makes the call once a consultation has a confirmed slot, and returns it", async () => {
     await expect(sync(consult())).resolves.toMatchObject({ link: "https://meet.google.com/abc-defg-hij" });
     expect(m.create).toHaveBeenCalledTimes(1);
-    expect(m.create.mock.calls[0][0].summary).toBe("MDW Wellness online consultation (ENQ-0101)");
+    expect(m.create.mock.calls[0].slice(1)).toEqual([
+      new Date("2026-11-05T05:00:00.000Z"),
+      new Date("2026-11-05T05:45:00.000Z"),
+    ]);
     expect(m.rows.get("b1").meet).toEqual({
       link: "https://meet.google.com/abc-defg-hij",
       eventId: "ev1",
       start: "2026-11-05T05:00:00.000Z",
       end: "2026-11-05T05:45:00.000Z",
+      details: expect.any(String),
     });
+  });
+
+  it("the event shows the booking, therapist and customer, and invites the therapist", async () => {
+    await sync(consult());
+    expect(sentOn(m.create)).toEqual({
+      summary: "MDW Wellness consultation: Asha Verma with Launch Therapist",
+      description: [
+        "Booking ID: ENQ-0101",
+        "Therapist: Launch Therapist (THR-0014)",
+        "Customer: Asha Verma (CUST-0074)",
+        "",
+        'The customer taps "Ask to join". The clinic account or the therapist lets them in.',
+      ].join("\n"),
+      guests: ["riya@gmail.com"],
+    });
+    // No email or name is copied onto the booking.
+    expect(m.rows.get("b1").meet.details).not.toMatch(/riya|Asha/i);
+  });
+
+  it("invites nobody for no therapist yet, or a placeholder email", async () => {
+    await sync(consult({ doctorId: undefined }));
+    expect(sentOn(m.create)).toMatchObject({ guests: [] });
+    expect(sentOn(m.create).description).toContain("Therapist: Not assigned yet");
+
+    m.doctors.set("THR-0099", { name: "Test", email: "email1@test.com" });
+    await sync(consult({ _id: "b2", doctorId: "THR-0099" }));
+    expect(sentOn(m.create, 1)).toMatchObject({ guests: [] });
+  });
+
+  it("a new therapist replaces the old one on the same call", async () => {
+    await sync(consult());
+    await expect(sync({ ...m.rows.get("b1"), doctorId: "THR-0020" })).resolves.toMatchObject({
+      link: "https://meet.google.com/abc-defg-hij",
+    });
+    expect(m.update).toHaveBeenCalledTimes(1);
+    expect(m.update.mock.calls[0][0]).toBe("ev1");
+    expect(sentOn(m.update)).toMatchObject({
+      summary: "MDW Wellness consultation: Asha Verma with Sanju Bag",
+      guests: ["bagsanju71@gmail.com"],
+    });
+  });
+
+  it("a call made before guests existed gets its therapist on the next save, once", async () => {
+    put(consult({
+      meet: { link: "https://meet.google.com/old", eventId: "ev0", start: "2026-11-05T05:00:00.000Z", end: "2026-11-05T05:45:00.000Z" },
+    }));
+    await syncBookingMeet(m.rows.get("b1"));
+    expect(m.update).toHaveBeenCalledWith("ev0", expect.objectContaining({ guests: ["riya@gmail.com"] }), expect.any(Date), expect.any(Date));
+    await syncBookingMeet(m.rows.get("b1"));
+    expect(m.update).toHaveBeenCalledTimes(1);
+    expect(m.create).not.toHaveBeenCalled();
   });
 
   it("does nothing for an unconfirmed enquiry, a home visit or a course", async () => {
@@ -111,11 +180,11 @@ describe("syncBookingMeet", () => {
     expect(m.create).not.toHaveBeenCalled();
   });
 
-  it("leaves the call alone when nothing about the time changed", async () => {
+  it("leaves the call alone when nothing changed", async () => {
     await sync(consult());
     await sync(m.rows.get("b1"));
     expect(m.create).toHaveBeenCalledTimes(1);
-    expect(m.move).not.toHaveBeenCalled();
+    expect(m.update).not.toHaveBeenCalled();
   });
 
   it("moves the same event when the slot moves, keeping the link", async () => {
@@ -124,7 +193,12 @@ describe("syncBookingMeet", () => {
       link: "https://meet.google.com/abc-defg-hij",
       start: "2026-11-05T06:30:00.000Z",
     });
-    expect(m.move).toHaveBeenCalledWith("ev1", new Date("2026-11-05T06:30:00.000Z"), new Date("2026-11-05T07:00:00.000Z"));
+    expect(m.update).toHaveBeenCalledWith(
+      "ev1",
+      expect.objectContaining({ guests: ["riya@gmail.com"] }),
+      new Date("2026-11-05T06:30:00.000Z"),
+      new Date("2026-11-05T07:00:00.000Z"),
+    );
     expect(m.rows.get("b1").meet).toMatchObject({ link: "https://meet.google.com/abc-defg-hij", start: "2026-11-05T06:30:00.000Z" });
   });
 
@@ -143,7 +217,7 @@ describe("syncBookingMeet", () => {
   it("keeps a finished call's link and never makes one for a done visit", async () => {
     await sync(consult());
     await sync({ ...m.rows.get("b1"), status: "completed", therapyStartTime: "15:00" });
-    expect(m.move).not.toHaveBeenCalled();
+    expect(m.update).not.toHaveBeenCalled();
     expect(m.rows.get("b1").meet.link).toBe("https://meet.google.com/abc-defg-hij");
     await sync(consult({ _id: "b2", status: "completed" }));
     expect(m.create).toHaveBeenCalledTimes(1);
@@ -153,7 +227,7 @@ describe("syncBookingMeet", () => {
     await sync(consult());
     await sync({ ...m.rows.get("b1"), therapyStartTime: "noon" });
     expect(m.del).not.toHaveBeenCalled();
-    expect(m.move).not.toHaveBeenCalled();
+    expect(m.update).not.toHaveBeenCalled();
   });
 
   it("two quick saves make one event", async () => {

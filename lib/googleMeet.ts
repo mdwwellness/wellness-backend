@@ -44,21 +44,34 @@ async function call(token: string, url: string, init: RequestInit = {}): Promise
   return body;
 }
 
+/** What the event says and who is invited (besides the clinic, which owns it). */
+export type MeetEventDetails = { summary: string; description: string; guests: string[] };
+
+// Invited guests get Google's email and the event on their own calendar, and
+// join without asking (the meeting stays "Trusted"). They can't see each other.
+function eventBody(d: MeetEventDetails, start: Date, end: Date) {
+  return {
+    summary: d.summary,
+    description: d.description,
+    start: { dateTime: start.toISOString() },
+    end: { dateTime: end.toISOString() },
+    attendees: d.guests.map((email) => ({ email })),
+    guestsCanSeeOtherGuests: false,
+    guestsCanInviteOthers: false,
+  };
+}
+
 /** Creates a calendar event with a Meet link; the link can take a moment to be ready. */
-export async function createMeetEvent(args: {
-  summary: string;
-  start: Date;
-  end: Date;
-  description?: string;
-}): Promise<{ eventId: string; meetLink: string }> {
+export async function createMeetEvent(
+  details: MeetEventDetails,
+  start: Date,
+  end: Date,
+): Promise<{ eventId: string; meetLink: string }> {
   const token = await accessToken();
-  let event = await call(token, `${CALENDAR}?conferenceDataVersion=1`, {
+  let event = await call(token, `${CALENDAR}?conferenceDataVersion=1&sendUpdates=all`, {
     method: "POST",
     body: JSON.stringify({
-      summary: args.summary,
-      description: args.description,
-      start: { dateTime: args.start.toISOString() },
-      end: { dateTime: args.end.toISOString() },
+      ...eventBody(details, start, end),
       conferenceData: {
         createRequest: { requestId: crypto.randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } },
       },
@@ -77,20 +90,23 @@ export async function createMeetEvent(args: {
   return { eventId: event.id, meetLink: event.hangoutLink };
 }
 
-/** Moves the event; the Meet link stays the same. */
-export async function moveMeetEvent(eventId: string, start: Date, end: Date): Promise<void> {
+/**
+ * Rewrites the event's time, text and guests; the Meet link stays the same.
+ * Google emails the guests, and a removed guest gets a cancellation.
+ */
+export async function updateMeetEvent(eventId: string, details: MeetEventDetails, start: Date, end: Date): Promise<void> {
   const token = await accessToken();
-  await call(token, `${CALENDAR}/${encodeURIComponent(eventId)}`, {
+  await call(token, `${CALENDAR}/${encodeURIComponent(eventId)}?sendUpdates=all`, {
     method: "PATCH",
-    body: JSON.stringify({ start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() } }),
+    body: JSON.stringify(eventBody(details, start, end)),
   });
 }
 
-/** Removes the event. One that is already gone counts as removed. */
+/** Removes the event (guests are told). One that is already gone counts as removed. */
 export async function deleteMeetEvent(eventId: string): Promise<void> {
   const token = await accessToken();
   try {
-    await call(token, `${CALENDAR}/${encodeURIComponent(eventId)}`, { method: "DELETE" });
+    await call(token, `${CALENDAR}/${encodeURIComponent(eventId)}?sendUpdates=all`, { method: "DELETE" });
   } catch (err: any) {
     if (err.status !== 404 && err.status !== 410) throw err;
   }

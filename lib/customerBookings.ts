@@ -21,6 +21,8 @@ export type CustomerBooking = {
   payToken: string | null;
   /** Google Meet link of an online consultation; the customer asks to join and is let in. */
   meetLink: string | null;
+  /** Google Calendar "add event" page for that call, on the customer's own calendar. */
+  calendarLink: string | null;
   createdAt: string | null;
 };
 
@@ -29,7 +31,7 @@ export type CustomerBooking = {
 const BOOKING_FIELDS =
   "enquiryId name service typeOfappointment bookingKind status slot physioSlot doctor " +
   "sessionsCompleted totalSessions preferredReachOutTime quotedPrice " +
-  "paymentReceived paymentAmount recommendedServices packageOriginId payToken meet.link createdAt";
+  "paymentReceived paymentAmount recommendedServices packageOriginId payToken meet.link meet.start meet.end createdAt";
 
 // slot.date is a Date at UTC midnight and physioSlot.date a "YYYY-MM-DD"
 // string, which also parses as UTC midnight, so the UTC day is the booked day.
@@ -37,6 +39,25 @@ function toIsoDay(value: unknown): string | null {
   if (!value) return null;
   const d = new Date(value as string | Date);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+// The customer isn't a guest of the meeting (a guest would join without
+// asking), so this adds a copy of it to their own calendar instead.
+// ponytail: Google Calendar only; add an .ics download when Apple/Outlook users ask.
+function calendarLink(doc: any): string | null {
+  const { link, start, end } = doc.meet ?? {};
+  if (!link || !start || !end) return null;
+  const stamp = (iso: string) => iso.replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  return `https://calendar.google.com/calendar/render?${new URLSearchParams({
+    action: "TEMPLATE",
+    text: "MDW Wellness online consultation",
+    dates: `${stamp(start)}/${stamp(end)}`,
+    details: [
+      `Video call: ${link}`,
+      'Open the link and tap "Ask to join". You\'ll be let in at your time.',
+      ...(doc.enquiryId ? [`Booking ID: ${doc.enquiryId}`] : []),
+    ].join("\n"),
+  })}`;
 }
 
 /** A booking as the customer may see it: explicit allow-list, nothing internal. */
@@ -70,6 +91,7 @@ export function toCustomerBooking(doc: any): CustomerBooking {
     paymentReceived: amountDue !== null ? amountDue <= 0 : doc.paymentReceived === true,
     payToken: cancelled ? null : doc.payToken ?? null,
     meetLink: cancelled ? null : doc.meet?.link ?? null,
+    calendarLink: cancelled ? null : calendarLink(doc),
     createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : null,
   };
 }

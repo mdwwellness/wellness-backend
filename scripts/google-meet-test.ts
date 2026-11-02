@@ -3,6 +3,8 @@
  * Needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN in .env.
  *
  *   npx tsx scripts/google-meet-test.ts                 creates a test event 1 hour from now
+ *   npx tsx scripts/google-meet-test.ts --guest <email> the same, with that Google account invited
+ *                                                       (to test whether a guest can let others in)
  *   npx tsx scripts/google-meet-test.ts --delete <id>   removes that test event
  */
 import dotenv from "dotenv";
@@ -23,13 +25,17 @@ async function main() {
     console.log("Test event deleted.");
     return;
   }
+  const guest = process.argv.indexOf("--guest");
   const start = new Date(Date.now() + 60 * 60_000);
-  const { eventId, meetLink } = await createMeetEvent({
-    summary: "MDW Wellness - test online consultation",
-    description: "Created by scripts/google-meet-test.ts. Safe to delete.",
+  const { eventId, meetLink } = await createMeetEvent(
+    {
+      summary: "MDW Wellness - test online consultation",
+      description: "Created by scripts/google-meet-test.ts. Safe to delete.",
+      guests: guest === -1 ? [] : [process.argv[guest + 1]],
+    },
     start,
-    end: new Date(start.getTime() + 30 * 60_000),
-  });
+    new Date(start.getTime() + 30 * 60_000),
+  );
   console.log(`Meet link: ${meetLink}`);
   console.log(`Event id:  ${eventId}`);
   console.log(`Delete it: npx tsx scripts/google-meet-test.ts --delete ${eventId}`);

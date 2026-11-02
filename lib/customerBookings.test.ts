@@ -63,6 +63,7 @@ describe("toCustomerBooking", () => {
         "patientName",
         "payToken",
         "meetLink",
+        "calendarLink",
         "paymentReceived",
         "preferredReachOutTime",
         "service",
@@ -90,6 +91,7 @@ describe("toCustomerBooking", () => {
       paymentReceived: false,
       payToken: "a".repeat(32),
       meetLink: null,
+      calendarLink: null,
       createdAt: "2026-10-01T08:00:00.000Z",
     });
   });
@@ -131,8 +133,29 @@ describe("toCustomerBooking", () => {
       paymentReceived: false,
       payToken: null,
       meetLink: null,
+      calendarLink: null,
       createdAt: null,
     });
+  });
+
+  it("gives a confirmed call an add-to-calendar link, and none once cancelled", () => {
+    const meet = {
+      link: "https://meet.google.com/abc-defg-hij",
+      eventId: "ev1",
+      start: "2026-11-05T05:00:00.000Z",
+      end: "2026-11-05T05:45:00.000Z",
+    };
+    const b = toCustomerBooking({ enquiryId: "ENQ-0101", meet });
+    expect(b.meetLink).toBe(meet.link);
+    const url = new URL(b.calendarLink!);
+    expect(url.origin + url.pathname).toBe("https://calendar.google.com/calendar/render");
+    expect(url.searchParams.get("action")).toBe("TEMPLATE");
+    expect(url.searchParams.get("dates")).toBe("20261105T050000Z/20261105T054500Z");
+    expect(url.searchParams.get("details")).toContain(meet.link);
+    expect(url.searchParams.get("details")).toContain("Booking ID: ENQ-0101");
+    // Nothing internal: no event id, therapist or customer details.
+    expect(b.calendarLink).not.toContain("ev1");
+    expect(toCustomerBooking({ status: "cancelled", meet }).calendarLink).toBeNull();
   });
 
   it("shows the scheduled visit (physioSlot) first, falling back to the requested slot", () => {

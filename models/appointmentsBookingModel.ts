@@ -253,12 +253,15 @@ const AppointmentBookingSchema = new Schema({
 
     // ── Online consultation video call (lib/bookingMeet.ts). Server-written:
     //    an event on the clinic's Google Calendar with a Meet link, kept in
-    //    step with the slot. `start`/`end` are the times the event was set to.
+    //    step with the slot and the therapist (invited as its guest).
+    //    `start`/`end` are the times the event was set to, `details` a hash of
+    //    its text and guest.
     meet: {
         link: { type: String },
         eventId: { type: String },
         start: { type: String },
         end: { type: String },
+        details: { type: String },
     },
 
     // ── Funnel checkpoint - payment (patient → clinic) ──
