@@ -1,23 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Request, Response } from "express";
 
-const { mockFindOneAndUpdate, mockDoctorFindOne, mockUserUpdate, mockDoctorFind, mockBookingFind } = vi.hoisted(() => ({
+const { mockFindOneAndUpdate, mockDoctorFindOne, mockUserUpdate, mockDoctorFind, mockBookingFind, mockUserFindOne, mockNewDoctor, mockNextSequence } = vi.hoisted(() => ({
   mockDoctorFind: vi.fn(),
   mockBookingFind: vi.fn(),
   mockFindOneAndUpdate: vi.fn(),
   mockDoctorFindOne: vi.fn(),
   mockUserUpdate: vi.fn(),
+  mockUserFindOne: vi.fn(),
+  // What `new Doctor(...)` was given (addDoctor).
+  mockNewDoctor: vi.fn(),
+  mockNextSequence: vi.fn(),
 }));
 vi.mock("../models/doctorsModel.ts", () => ({
-  Doctor: { findOne: mockDoctorFindOne, findOneAndUpdate: mockFindOneAndUpdate, find: mockDoctorFind },
+  Doctor: Object.assign(
+    function (this: any, fields: any) {
+      mockNewDoctor(fields);
+      this.save = async () => this;
+    },
+    { findOne: mockDoctorFindOne, findOneAndUpdate: mockFindOneAndUpdate, find: mockDoctorFind },
+  ),
 }));
 vi.mock("../models/userModel.ts", () => ({
-  default: { findOne: vi.fn(), findByIdAndUpdate: mockUserUpdate },
+  default: Object.assign(
+    function (this: any) {
+      this._id = "u1";
+      this.save = async () => this;
+    },
+    { findOne: mockUserFindOne, findByIdAndUpdate: mockUserUpdate, findByIdAndDelete: vi.fn() },
+  ),
 }));
 vi.mock("../models/appointmentsBookingModel.ts", () => ({ default: { find: mockBookingFind } }));
 vi.mock("../models/therapistLeaveModel.ts", () => ({ TherapistLeave: {} }));
 vi.mock("../lib/logger.ts", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
-vi.mock("../lib/counters.ts", () => ({ nextSequence: vi.fn() }));
+vi.mock("../lib/counters.ts", () => ({ nextSequence: mockNextSequence }));
 
 import { addDoctor, getDoctors, getReferrals, updateDoctorDetails, updateTherapistSuperAdmin } from "./DoctorController.ts";
 
@@ -92,6 +108,29 @@ describe("addDoctor - input validation", () => {
       expect.objectContaining({ message: expect.stringContaining("split") })
     );
   });
+
+  it("always gives the next THR-#### id, ignoring one typed in (ISSUES #64)", async () => {
+    mockDoctorFindOne.mockReturnValue({ exec: async () => null });
+    mockUserFindOne.mockReturnValue({ exec: async () => null });
+    mockNextSequence.mockResolvedValue(15);
+    const req = {
+      ...mockReq({
+        name: "man testtherapist",
+        doctorId: "efefefef",
+        email: "man@example.com",
+        phonenumber: "9999999999",
+        password: "password123",
+        splitPercent: 60,
+      }),
+      user: { role: "SUPER_ADMIN" },
+    } as unknown as Request;
+    const res = mockRes();
+
+    await addDoctor(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mockNewDoctor.mock.calls[0][0].doctorId).toBe("THR-0015");
+  });
 });
 
 describe("updateDoctorDetails - earnings split", () => {
@@ -133,7 +172,17 @@ describe("updateDoctorDetails - earnings split", () => {
   it("a therapist can't switch themselves off or change their ID", async () => {
     ownRecord();
     await updateDoctorDetails(asTherapist({ name: "T", isActive: false, doctorId: "THR-9999" }), mockRes());
-    expect(savedUpdate()).toMatchObject({ name: "T", isActive: undefined, doctorId: undefined });
+    expect(savedUpdate()).toMatchObject({ name: "T", isActive: undefined });
+    expect(savedUpdate()).not.toHaveProperty("doctorId");
+  });
+
+  it("nobody can change a therapist ID, not even an admin (ISSUES #64)", async () => {
+    for (const role of ["ADMIN", "STAFF", "SUPER_ADMIN"]) {
+      vi.clearAllMocks();
+      mockFindOneAndUpdate.mockResolvedValue({ doctorId: "THR-0001" });
+      await updateDoctorDetails(updateReq(role, { name: "T", doctorId: "efefefef" }), mockRes());
+      expect(savedUpdate()).not.toHaveProperty("doctorId");
+    }
   });
 
   it("rejects an out-of-range split from an admin", async () => {

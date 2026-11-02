@@ -56,7 +56,7 @@ export async function addDoctor(req: Request, res: Response) {
   try {
 
     const details = req.body;
-    const { doctorId, name, email, phonenumber, password } = details;
+    const { name, email, phonenumber, password } = details;
 
     if (!String(name ?? "").trim() || !email || !phonenumber) {
       return res.status(400).send({
@@ -109,10 +109,9 @@ export async function addDoctor(req: Request, res: Response) {
     });
     await newUser.save();
 
-    // 2) Create the roster profile, linked to the user, with an auto THR-#### id.
-    const finalDoctorId =
-      doctorId ||
-      `THR-${String(await nextSequence("therapist")).padStart(4, "0")}`;
+    // 2) Create the roster profile, linked to the user. The THR-#### id is
+    // always the server's: bookings, earnings and leave all point at it.
+    const finalDoctorId = `THR-${String(await nextSequence("therapist")).padStart(4, "0")}`;
     try {
       const { password: _pw, ...doctorFields } = details;
       await withUniqueReferralCode((referralCode) =>
@@ -252,15 +251,14 @@ export async function getPersonalAppointments(req: Request, res: Response) {
 export async function updateDoctorDetails(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    // A therapist edits only their own profile (#19), and can't switch
-    // themselves off or change their therapist ID.
+    // A therapist edits only their own profile (#19) and can't switch
+    // themselves off. Nobody changes a therapist ID (ISSUES #64).
     if (!(await mayActOnTherapist(req.user as any, id))) {
       return res.status(403).json({ message: "You can only edit your own profile." });
     }
     const isTherapist = (req.user as any)?.role === "THERAPIST";
     const { name, phonenumber, email, specialization, bio, profileImage, certificates, weekOffDays } = req.body;
     if (isBlankName(name)) return res.status(400).json({ message: "Name is required." });
-    const doctorId = isTherapist ? undefined : req.body.doctorId;
     const isActive = isTherapist ? undefined : req.body.isActive;
     const split = readSplitUpdate(req);
     if (split.error) return res.status(400).json({ message: split.error });
@@ -269,7 +267,7 @@ export async function updateDoctorDetails(req: Request, res: Response) {
 
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { doctorId: id },
-      { name, doctorId, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays, ...split.fields, ...link.fields },
+      { name, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays, ...split.fields, ...link.fields },
       { new: true, runValidators: true }
     );
 
