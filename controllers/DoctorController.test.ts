@@ -144,30 +144,45 @@ describe("updateDoctorDetails - earnings split", () => {
   });
 });
 
-describe("updateTherapistSuperAdmin - login names", () => {
+describe("therapist name (ISSUES #62)", () => {
   const chain = (value: unknown) => ({ exec: () => Promise.resolve(value), select: () => ({ exec: () => Promise.resolve(value) }) });
+  // What the drawer sends: the whole record, with one name field.
+  const save = (body: object, role = "SUPER_ADMIN") =>
+    ({ params: { id: "THR-0014" }, body: { name: "Launch Therapist", email: "t@x.com", isActive: true, ...body }, user: { role } }) as unknown as Request;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDoctorFindOne.mockReturnValue(chain({ doctorId: "THR-0012", userId: "u1", email: "t@x.com", phonenumber: "9876500001" }));
-    mockFindOneAndUpdate.mockReturnValue(chain({ doctorId: "THR-0012" }));
+    mockDoctorFindOne.mockReturnValue(chain({ doctorId: "THR-0014", name: "Launch Therapist", userId: "u1", email: "t@x.com", phonenumber: "9876500001" }));
+    mockFindOneAndUpdate.mockReturnValue(chain({ doctorId: "THR-0014" }));
     mockUserUpdate.mockReturnValue(chain({ _id: "u1" }));
   });
 
-  it("doesn't copy empty first/last names onto the login (they're required there)", async () => {
-    const req = { params: { id: "THR-0012" }, body: { firstName: "", lastName: " ", isActive: true, splitPercent: 60 }, user: { role: "SUPER_ADMIN" } } as unknown as Request;
+  it("refuses a blank name with a clear message and saves nothing", async () => {
+    for (const name of ["", "   "]) {
+      const res = mockRes();
+      await updateTherapistSuperAdmin(save({ name }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({ message: "Name is required." });
+    }
     const res = mockRes();
-    await updateTherapistSuperAdmin(req, res);
+    await updateDoctorDetails(save({ name: "" }, "ADMIN"), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a renamed therapist's login gets the new first and last name", async () => {
+    await updateTherapistSuperAdmin(save({ name: " Riya  Sen Gupta " }), mockRes());
+    expect(mockUserUpdate.mock.calls[0][1].$set).toMatchObject({ userfName: "Riya", userlName: "Sen Gupta" });
+    vi.clearAllMocks();
+    await updateTherapistSuperAdmin(save({ name: "Riya" }), mockRes());
+    expect(mockUserUpdate.mock.calls[0][1].$set).toMatchObject({ userfName: "Riya", userlName: "-" });
+  });
+
+  it("a save that doesn't change the name (status, split) leaves the login name alone", async () => {
+    await updateTherapistSuperAdmin(save({ isActive: false, splitPercent: 60 }), mockRes());
     const userSet = mockUserUpdate.mock.calls[0]?.[1]?.$set ?? {};
     expect(userSet).not.toHaveProperty("userfName");
     expect(userSet).not.toHaveProperty("userlName");
-    expect(res.status).not.toHaveBeenCalledWith(500);
-  });
-
-  it("still copies real names", async () => {
-    const req = { params: { id: "THR-0012" }, body: { firstName: " Riya ", lastName: "Sen" }, user: { role: "SUPER_ADMIN" } } as unknown as Request;
-    await updateTherapistSuperAdmin(req, mockRes());
-    expect(mockUserUpdate.mock.calls[0][1].$set).toMatchObject({ userfName: "Riya", userlName: "Sen" });
   });
 });
 

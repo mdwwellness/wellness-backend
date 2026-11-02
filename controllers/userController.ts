@@ -371,8 +371,6 @@ export const adminEditUserProfile = async (req: Request, res: Response) => {
     if (user.role === "THERAPIST") {
         const doctorUpdate: Record<string, unknown> = {};
         if (userfName !== undefined || userlName !== undefined) {
-            doctorUpdate.firstName = user.userfName || "";
-            doctorUpdate.lastName = user.userlName || "";
             doctorUpdate.name = `${user.userfName} ${user.userlName}`.trim();
         }
         if (userEmail !== undefined) doctorUpdate.email = userEmail;
@@ -477,8 +475,6 @@ export const completeProfile = async (req:Request, res:Response) => {
         if (updatedUser && updatedUser.role === "THERAPIST") {
             const doctorUpdate: Record<string, unknown> = {};
             if (updateData.userfName || updateData.userlName) {
-                doctorUpdate.firstName = updatedUser.userfName || "";
-                doctorUpdate.lastName = updatedUser.userlName || "";
                 doctorUpdate.name = `${updatedUser.userfName} ${updatedUser.userlName}`.trim();
             }
             if (userEmail) doctorUpdate.email = userEmail;

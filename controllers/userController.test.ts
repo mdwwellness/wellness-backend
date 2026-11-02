@@ -127,8 +127,6 @@ describe("completeProfile — Doctor sync", () => {
       { userId: "user123" },
       {
         $set: {
-          firstName: "New",
-          lastName: "Name",
           name: "New Name",
           email: "new@example.com",
           phonenumber: 2222222222,
@@ -234,8 +232,6 @@ describe("completeProfile — Doctor sync", () => {
       { userId: "user123" },
       {
         $set: {
-          firstName: "New",
-          lastName: "Name",
           name: "New Name",
         },
       }
@@ -282,8 +278,6 @@ describe("adminEditUserProfile — Doctor sync", () => {
       { userId: "user456" },
       {
         $set: {
-          firstName: "New",
-          lastName: "Name",
           name: "New Name",
           email: "new@example.com",
           phonenumber: 2222222222,

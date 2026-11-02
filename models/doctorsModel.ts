@@ -13,17 +13,11 @@ const doctorsSchema = new mongoose.Schema({
     userId: {
         type: String,
     },
+    // The one place a therapist's name lives (the login keeps its own first/last copy).
     name: {
         type: String,
         required: true,
-    },
-    firstName: {
-        type: String,
-        default: "",
-    },
-    lastName: {
-        type: String,
-        default: "",
+        trim: true,
     },
     gender:{
         type:String,

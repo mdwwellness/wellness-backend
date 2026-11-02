@@ -41,6 +41,16 @@ function readProfileLink(req: Request): { fields: { profileLink?: string }; erro
   return { fields: { profileLink } };
 }
 
+/** The login's first/last name from a therapist's full name; the login requires both. */
+function loginNames(name: string) {
+  const [first, ...rest] = name.trim().split(/\s+/);
+  return { userfName: first, userlName: rest.join(" ") || "-" };
+}
+
+/** A name sent as blank (the database would refuse it with an unclear 500). */
+function isBlankName(name: unknown): boolean {
+  return name !== undefined && !String(name ?? "").trim();
+}
 
 export async function addDoctor(req: Request, res: Response) {
   try {
@@ -48,7 +58,7 @@ export async function addDoctor(req: Request, res: Response) {
     const details = req.body;
     const { doctorId, name, email, phonenumber, password } = details;
 
-    if (!name || !email || !phonenumber) {
+    if (!String(name ?? "").trim() || !email || !phonenumber) {
       return res.status(400).send({
         success: false,
         message: "Name, email and phone number are required.",
@@ -90,10 +100,8 @@ export async function addDoctor(req: Request, res: Response) {
     }
 
     // 1) Create the login account (role THERAPIST). The model hashes the password.
-    const [first, ...rest] = String(name).trim().split(/\s+/);
     const newUser = new User({
-      userfName: first || name,
-      userlName: rest.join(" ") || "-",
+      ...loginNames(String(name)),
       userEmail: email,
       userPhone: String(phonenumber),
       userPassword: String(password),
@@ -251,6 +259,7 @@ export async function updateDoctorDetails(req: Request, res: Response) {
     }
     const isTherapist = (req.user as any)?.role === "THERAPIST";
     const { name, phonenumber, email, specialization, bio, profileImage, certificates, weekOffDays } = req.body;
+    if (isBlankName(name)) return res.status(400).json({ message: "Name is required." });
     const doctorId = isTherapist ? undefined : req.body.doctorId;
     const isActive = isTherapist ? undefined : req.body.isActive;
     const split = readSplitUpdate(req);
@@ -286,7 +295,8 @@ export async function updateDoctorDetails(req: Request, res: Response) {
 export async function updateTherapistSuperAdmin(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name, firstName, lastName, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays } = req.body;
+    const { name, phonenumber, email, specialization, bio, isActive, profileImage, certificates, weekOffDays } = req.body;
+    if (isBlankName(name)) return res.status(400).json({ message: "Name is required." });
 
     // 1️⃣ Find the Doctor first to get userId
     const doctor = await Doctor.findOne({ doctorId: id }).exec();
@@ -323,8 +333,6 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
 
     // 3️⃣ Update the Doctor document
     const doctorUpdate: Record<string, unknown> = {};
-    if (firstName !== undefined) doctorUpdate.firstName = firstName;
-    if (lastName !== undefined) doctorUpdate.lastName = lastName;
     if (name !== undefined) doctorUpdate.name = name;
     if (phonenumber !== undefined) doctorUpdate.phonenumber = phonenumber;
     if (email !== undefined) doctorUpdate.email = email;
@@ -355,11 +363,9 @@ export async function updateTherapistSuperAdmin(req: Request, res: Response) {
     const userUpdate: Record<string, unknown> = {};
     if (email) userUpdate.userEmail = email;
     if (phonenumber) userUpdate.userPhone = phonenumber;
-    // Only non-empty names: the login requires both, and therapists added via
-    // "Add Therapist" have firstName/lastName "" that every save echoes back,
-    // which failed the whole request after the Doctor update had already saved.
-    if (typeof firstName === "string" && firstName.trim()) userUpdate.userfName = firstName.trim();
-    if (typeof lastName === "string" && lastName.trim()) userUpdate.userlName = lastName.trim();
+    // Only when the name really changed: status and split saves echo the whole
+    // record back, and mustn't rewrite a login name edited in Settings > Users.
+    if (typeof name === "string" && name.trim() !== doctor.name) Object.assign(userUpdate, loginNames(name));
     if (typeof isActive === "boolean") userUpdate.isActive = isActive;
 
     let updatedUser = null;
