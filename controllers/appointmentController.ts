@@ -58,7 +58,22 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
         // dashboard path and the public path can never drift apart again.
         // No pinned source here: staff pick online / whatsapp / walk-in /
         // therapist on the form, and createBooking validates it.
-        const result = await createBooking(req.body, { actor });
+        // A referral code typed by staff makes it the referring therapist's
+        // booking. Unlike the public form, a wrong code is an error: the office
+        // should know.
+        const { referralCode, ...body } = req.body ?? {};
+        let input = body;
+        if (typeof referralCode === "string" && referralCode.trim()) {
+            const referrer = await referrerForCode(referralCode);
+            if (!referrer) {
+                return res.status(400).send({
+                    success: false,
+                    message: "That referral code doesn't match an active therapist.",
+                });
+            }
+            input = { ...body, source: "therapist", referredByDoctorId: referrer };
+        }
+        const result = await createBooking(input, { actor });
 
         if (!result.ok) {
             return res

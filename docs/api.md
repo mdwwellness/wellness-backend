@@ -422,6 +422,14 @@ Only `name` and `phonenumber` are wire-required. Everything else is
 optional. See [models.md → AppointmentBooking](models.md#appointmentbooking)
 for the full field list and which fields fill in at each funnel stage.
 
+- `service`: one of "Online Consultation", "Home Therapy", "Vitals Check".
+  When `typeOfappointment` is left out, the server sets it from the service
+  (`consultation` for the online consultation, otherwise `appointment`).
+- `referralCode` (optional): a therapist's referral code. A valid code of an
+  active therapist makes the booking that therapist's referral (`source:
+  "therapist"`, whatever `source` says). Unlike the public form, an unknown
+  code is refused: 400 "That referral code doesn't match an active therapist."
+
 **Duplicate-phone behavior**: Staff creates never fold or block: a second record for the same phone is
 allowed. Repeat folding exists only on the public form
 (`POST /api/appointments/public`) and the customer app

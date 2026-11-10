@@ -29,6 +29,8 @@ vi.mock("./bookingSource.ts", () => ({
 vi.mock("./invoiceGeneration.ts", () => ({
   ensureCustomerForAppointment: m.ensureCustomer,
   maybeCreateInvoiceForAppointment: m.maybeInvoice,
+  // Empty, so the catalogue price lookup finds no service and never reads the DB.
+  BOOKING_TYPE_SERVICE: {},
 }));
 
 import { courseDayOffset, courseScheduleOf, createBooking } from "./bookingService.ts";
@@ -78,7 +80,8 @@ describe("createBooking: repeat folding", () => {
     // Scheduled / ongoing bookings and course follow-ups are never candidates.
     expect(m.find).toHaveBeenCalledWith({ phonenumber: PHONE, status: "enquiry" });
     expect(existing.activityLog[0].action).toBe(
-      "Re-submitted (#2): service: Vitals Check, vitals: Blood Sugar, BP, note: mornings",
+      // The type comes from the offering (as the site sends it).
+      "Re-submitted (#2): service: Vitals Check, type: appointment, vitals: Blood Sugar, BP, note: mornings",
     );
     expect(existing.save).toHaveBeenCalled();
     expect(m.created).toHaveLength(0);
@@ -144,6 +147,23 @@ describe("createBooking: customer link", () => {
 
     expect(m.created[0].customer_id).toBeUndefined();
     expect(m.ensureCustomer).toHaveBeenCalledWith(m.created[0]);
+  });
+});
+
+describe("createBooking: booking type from the offering", () => {
+  it("fills in how the offering is delivered when the caller didn't say", async () => {
+    m.find.mockResolvedValue([]);
+    await createBooking(request({ service: "Online Consultation" }));
+    await createBooking(request({ service: "Home Therapy" }));
+    await createBooking(request({ service: "Vitals Check" }));
+    expect(m.created.map((b) => b.typeOfappointment)).toEqual(["consultation", "appointment", "appointment"]);
+  });
+
+  it("keeps a type the caller sent, and leaves other services alone", async () => {
+    m.find.mockResolvedValue([]);
+    await createBooking(request({ service: "Home Therapy", typeOfappointment: "consultation" }));
+    await createBooking(request({ service: "Cupping" }));
+    expect(m.created.map((b) => b.typeOfappointment)).toEqual(["consultation", undefined]);
   });
 });
 

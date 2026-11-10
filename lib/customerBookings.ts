@@ -1,7 +1,7 @@
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { payableLedger } from "./bookingMoney.ts";
 import { createBooking } from "./bookingService.ts";
-import { OFFERINGS } from "./offerings.ts";
+import { OFFERINGS, bookingTypeOf } from "./offerings.ts";
 import { isPlainObject } from "./validation.ts";
 
 export type CustomerBooking = {
@@ -210,8 +210,7 @@ export async function createBookingForCustomer(
       phonenumber: Number(who.phone10),
       email: who.email || undefined,
       location: request.location || who.defaultLocation || undefined,
-      // Same mapping as the patient site: only the online consultation is remote.
-      typeOfappointment: request.service === "Online Consultation" ? "consultation" : "appointment",
+      typeOfappointment: bookingTypeOf(request.service),
       service: request.service,
       vitals: request.vitals,
       preferredReachOutTime: request.preferredReachOutTime,

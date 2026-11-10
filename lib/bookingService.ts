@@ -6,6 +6,7 @@ import { resolveBookingSource } from "./bookingSource.ts";
 import { cataloguePrice, isIntake, stripServerOwned } from "./lockedFields.ts";
 import { todayInIndia } from "./personDetails.ts";
 import { syncBookingMeet } from "./bookingMeet.ts";
+import { bookingTypeOf } from "./offerings.ts";
 import {
   ensureCustomerForAppointment,
   maybeCreateInvoiceForAppointment,
@@ -185,6 +186,11 @@ export async function createBooking(
   input: Record<string, any>,
   opts: CreateBookingOptions = {},
 ): Promise<CreateBookingResult> {
+  // An offering implies how it's delivered (and so its catalogue price), when
+  // the caller didn't say: the Customers' App and the New enquiry form.
+  if (!input.typeOfappointment && bookingTypeOf(input.service)) {
+    input = { ...input, typeOfappointment: bookingTypeOf(input.service) };
+  }
   const name = typeof input.name === "string" ? input.name.trim() : "";
   const phonenumber = input.phonenumber;
 
