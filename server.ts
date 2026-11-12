@@ -145,9 +145,11 @@ app.get("/", (req, res) => {
 // else is logged (digits masked) and answered 500. Shared with the router tests.
 app.use(errorHandler);
 
-// Start server
+// Start server: database first. Listening before it was connected let early
+// requests wait 10 s and fail ("buffering timed out"). Render only sends traffic
+// once the port opens, so a deploy now waits for the database too.
 const PORT = process.env.PORT || 10000;
+await connect();
 app.listen(PORT, () => {
   logger.info(`Backend listening on port ${PORT}`);
-  connect();
 });
