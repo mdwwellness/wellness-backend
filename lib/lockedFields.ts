@@ -68,9 +68,23 @@ export async function addonCataloguePrice(
     const original = svc.originalPrice ?? svc.price ?? 0;
     return { name: svc.name, price: applyDiscount ? (svc.discountedPrice ?? svc.recommendedPrice ?? original) : original };
   }
+  return { name: svc.name, price: tierRate(await rateCardTiers(), count) * count };
+}
+
+/** The global session rate card's tiers ([from, to] sessions → ₹/session). */
+export async function rateCardTiers(): Promise<any[]> {
   const table: any = await SessionRate.findOne({ key: "global" }).lean();
-  const tier = (table?.tiers ?? []).find((t: any) => count >= t.from && (t.to == null || count <= t.to));
-  return { name: svc.name, price: tier ? (tier.rate ?? 0) * count : 0 };
+  return table?.tiers ?? [];
+}
+
+/**
+ * The per-session rate for `count` sessions; 0 when no tier covers it. Its rate
+ * for 1 session is the standard price a package's rate is a discount from.
+ * KEEP IN SYNC with the dashboard's sessionRate (src/lib/service-pricing.ts).
+ */
+export function tierRate(tiers: any[], count: number): number {
+  const tier = tiers.find((t: any) => count >= t.from && (t.to == null || count <= t.to));
+  return tier?.rate ?? 0;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocatePaid, sessionShare } from "./invoiceView.ts";
+import { allocatePaid, listPrice, sessionShare } from "./invoiceView.ts";
 
 describe("allocatePaid", () => {
   it("covers the earliest sessions first, with the methods that paid them", () => {
@@ -37,5 +37,22 @@ describe("sessionShare", () => {
     const shares = [1, 2, 3].map((n) => sessionShare(1000, 3, n));
     expect(shares.reduce((a, b) => a + b, 0)).toBe(1000);
     expect(shares).toEqual([333, 334, 333]);
+  });
+});
+
+describe("listPrice", () => {
+  // Rate card: 1-5 sessions ₹1600, 6-10 ₹1500.
+  it("a 6-session package at ₹1500 each shows the standard ₹1600 each crossed out", () => {
+    expect(listPrice(9000, 6, 1600)).toBe(9600);
+  });
+
+  it("nothing to cross out when it's charged at the standard rate", () => {
+    expect(listPrice(1600 * 3, 3, 1600)).toBeUndefined();
+    expect(listPrice(9000, 6, 0)).toBeUndefined(); // no rate card
+  });
+
+  it("an offer on top: the higher of the two 'before' prices", () => {
+    expect(listPrice(8000, 6, 1600, 9000)).toBe(9600);
+    expect(listPrice(8000, 6, 1300, 9000)).toBe(9000);
   });
 });

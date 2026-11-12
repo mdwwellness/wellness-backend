@@ -6,6 +6,7 @@ import Customer from "../models/customerModel.ts";
 import Invoice from "../models/invoiceModel.ts";
 import Service from "../models/serviceModel.ts";
 import { addonKey } from "./payments.ts";
+import { rateCardTiers, tierRate } from "./lockedFields.ts";
 import { customerAge } from "./personDetails.ts";
 import { clockLabel, dayLabel, paidAtLabel, visitLabel } from "./sessionDates.ts";
 import type { InvoiceRow, InvoiceView } from "./invoicePdf.ts";
@@ -60,6 +61,16 @@ export function allocatePaid(
 export const sessionShare = (price: number, total: number, n: number) =>
   Math.round((price / total) * n) - Math.round((price / total) * (n - 1));
 
+/**
+ * What sessions priced from the rate card cost before any discount, to show
+ * crossed out: the standard 1-session rate × sessions, or an offer's pre-offer
+ * price, whichever is higher. Undefined when neither is above what was charged.
+ */
+export function listPrice(charged: number, sessions: number, standardRate: number, offerBase?: number): number | undefined {
+  const base = Math.max(Number(offerBase) || 0, standardRate * sessions);
+  return base > charged ? base : undefined;
+}
+
 const done = (visit: any) => visit?.status === "completed";
 
 /** Who did it, or "Upcoming": no therapist is named until the visit is done. */
@@ -87,11 +98,14 @@ export async function invoiceView(invoice: InvoiceDoc): Promise<InvoiceView> {
       .filter((r: any) => r?.serviceName && r.status === "confirmed")
       .map((r: any) => ({ r, visit: v })),
   );
-  const [pkg, services, customer] = await Promise.all([
+  const [pkg, services, customer, tiers] = await Promise.all([
     booking?.packageServiceId ? Service.findOne({ serviceId: booking.packageServiceId }).lean() : null,
     live.length ? Service.find({ serviceId: { $in: live.map((a) => a.r.serviceId) } }).lean() : [],
     booking?.age == null ? Customer.findOne({ customer_id: inv.customer_id }).lean() : null,
+    rateCardTiers(),
   ]);
+  // The rate card's 1-session price: a package's lower rate is shown against it.
+  const standardRate = tierRate(tiers, 1);
   const serviceById = new Map((services as any[]).map((s) => [s.serviceId, s]));
   const offers: any[] = booking?.appliedOffers ?? [];
   // An offer's pre-offer price, only when this line really is that offer's
@@ -123,7 +137,7 @@ export async function invoiceView(invoice: InvoiceDoc): Promise<InvoiceView> {
 
   if (isPackage) {
     const line = mainLines[0];
-    const base = lineBase(line, offerBase(line, (o) => o.lineKind === "main"));
+    const base = lineBase(line, listPrice(line.price, totalSessions, standardRate, offerBase(line, (o) => o.lineKind === "main")));
     const visitOf = (n: number) =>
       n === 1 ? booking : (sessions.find((s) => Number(s.sessionNumber) === n) ?? sessions[n - 2]);
     // A package kept on one booking (no visit per session) counts its sessions done.
@@ -187,10 +201,11 @@ export async function invoiceView(invoice: InvoiceDoc): Promise<InvoiceView> {
       (Number(r?.sessions) || 1) <= 1 && svc?.discountedPrice === before && svc.originalPrice > before
         ? svc.originalPrice
         : undefined;
-    const mrp = lineBase(line, catalogue ?? offered);
+    // Several sessions are priced from the rate card, like a package.
+    const count = Number(r?.sessions) || 1;
+    const mrp = lineBase(line, count > 1 ? listPrice(line.price, count, standardRate, offered) : (catalogue ?? offered));
 
     // Per session when it divides evenly; otherwise one row for the lot.
-    const count = Number(r?.sessions) || 1;
     const per = Math.round(line.price / count);
     const qty = per * count === line.price ? count : 1;
     const [paid] = allocatePaid([line.price], linePaid(line), payments.filter((p) => p.for === name));
