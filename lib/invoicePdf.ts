@@ -67,6 +67,8 @@ const C = {
   dueText: "#92400e",
 };
 
+// Slimmed copies of Inter (Latin, ₹, punctuation; kerning and tabular figures
+// only). The full font made every PDF take ~1.4 s to draw; see assets/fonts/README.md.
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "assets", "fonts");
 const R = "Inter";
 const S = "Inter-SemiBold";
@@ -424,8 +426,8 @@ function footer(doc: Doc, page: number, pages: number) {
 
 export function renderInvoicePdf(v: InvoiceView): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: PAGE.m, bufferPages: true, info: { Title: `Invoice ${v.invoiceId}` } });
-  doc.registerFont(R, path.join(FONTS, "Inter-Regular.woff"));
-  doc.registerFont(S, path.join(FONTS, "Inter-SemiBold.woff"));
+  doc.registerFont(R, path.join(FONTS, "Inter-Regular.ttf"));
+  doc.registerFont(S, path.join(FONTS, "Inter-SemiBold.ttf"));
   const chunks: Buffer[] = [];
   doc.on("data", (d: Buffer) => chunks.push(d));
   const done = new Promise<Buffer>((resolve, reject) => {
