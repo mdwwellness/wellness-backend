@@ -223,7 +223,13 @@ export async function recordPayment(args: {
   const total = paid + amount;
   const full = total >= price;
   const now = new Date();
-  const entry = { amount, method, at: now, by, byRole: user?.role ?? "", ...(addon ? { for: addon.serviceName } : {}) };
+  // A therapist's own payment says which therapist took it (their cash in hand).
+  const byDoctorId = user?.role === "THERAPIST" ? await ownDoctorId(user) : null;
+  const entry = {
+    amount, method, at: now, by, byRole: user?.role ?? "",
+    ...(byDoctorId ? { byDoctorId } : {}),
+    ...(addon ? { for: addon.serviceName } : {}),
+  };
 
   const booking = addon
     ? await AppointmentBooking.findOneAndUpdate(

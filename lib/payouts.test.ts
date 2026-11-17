@@ -9,8 +9,9 @@ vi.mock("../models/appointmentsBookingModel.ts", () => ({
   default: { findOneAndUpdate: mockFindOneAndUpdate, find: mockFind, findById: vi.fn() },
 }));
 vi.mock("../models/doctorsModel.ts", () => ({ Doctor: { find: mockDoctorFind } }));
+vi.mock("../models/therapistSettlementModel.ts", () => ({ TherapistSettlement: { find: vi.fn() } }));
 
-import { cutOf, payoutOf, recordPayout, withPayouts } from "./payouts.ts";
+import { balancesOf, cashHolder, cutOf, payoutOf, recordPayout, withPayouts } from "./payouts.ts";
 
 const ctx = (rows: any[] = [], splits: Record<string, number | null> = {}) => ({
   byId: new Map(rows.map((r) => [String(r._id), r])),
@@ -263,5 +264,51 @@ describe("recordPayout", () => {
   it("says so when the write lost a race", async () => {
     mockFindOneAndUpdate.mockReturnValue({ exec: () => Promise.resolve(null) });
     expect(await recordPayout({ row, paid: true })).toMatchObject({ ok: false, code: 409 });
+  });
+});
+
+describe("balancesOf - cash in hand comes off what a therapist is paid", () => {
+  // Two done, fully paid home visits for therapist A at 60%: ₹1,600 paid in cash
+  // to A at the door, ₹1,000 paid by UPI to the clinic.
+  const cashVisit = {
+    _id: "h1", enquiryId: "ENQ-0001", quotedPrice: 1600, paymentAmount: 1600, paymentReceived: true,
+    doctorId: "A", doctor: "Asha", therapistSplitPercent: 60, status: "completed",
+    payments: [{ amount: 1600, method: "cash", at: "2026-11-01T10:00:00Z", byRole: "THERAPIST", byDoctorId: "A" }],
+  };
+  const upiVisit = {
+    _id: "h2", enquiryId: "ENQ-0002", quotedPrice: 1000, paymentAmount: 1000, paymentReceived: true,
+    doctorId: "A", doctor: "Asha", therapistSplitPercent: 60, status: "completed",
+    payments: [{ amount: 1000, method: "upi", at: "2026-11-02T10:00:00Z", byRole: "ADMIN" }],
+  };
+  const names = new Map([["A", "Asha"]]);
+  const one = (rows: any[], settlements: any[] = []) => balancesOf(rows, ctx(rows, { A: 60 }), settlements, names)[0];
+
+  it("earned less the cash they hold: holding more than they earned means they owe the clinic", () => {
+    const b = one([cashVisit, upiVisit]);
+    expect(b).toMatchObject({ doctorId: "A", doctor: "Asha", earned: 1560, cashTotal: 1600, paid: 0, received: 0, remaining: -40 });
+    expect(b.cash).toEqual([{ enquiryId: "ENQ-0001", amount: 1600, at: "2026-11-01T10:00:00.000Z" }]);
+  });
+
+  it("settlements: cash handed back raises the balance, a payment lowers it", () => {
+    expect(one([cashVisit, upiVisit], [{ doctorId: "A", amount: 40, direction: "received" }]).remaining).toBe(0);
+    expect(one([upiVisit], [{ doctorId: "A", amount: 600, direction: "paid" }])).toMatchObject({ paid: 600, remaining: 0 });
+  });
+
+  it("an older per-booking payout counts as paid", () => {
+    const paidOut = { ...upiVisit, therapistPayouts: [{ doctorId: "A", amount: 600 }] };
+    expect(one([paidOut])).toMatchObject({ earned: 600, paid: 600, remaining: 0 });
+  });
+
+  it("a booking with no therapist yet makes no blank row (ISSUES #65)", () => {
+    const unassigned = { _id: "h3", enquiryId: "ENQ-0003", quotedPrice: 1600, doctorId: "", status: "scheduled" };
+    const all = balancesOf([cashVisit, unassigned], ctx([cashVisit, unassigned], { A: 60 }), [], names);
+    expect(all.map((b) => b.doctorId)).toEqual(["A"]);
+  });
+
+  it("whose cash it is: the recording therapist; older cash by a therapist is the visit's; the office's cash isn't anyone's", () => {
+    expect(cashHolder({ method: "cash", byDoctorId: "B" }, { doctorId: "A" })).toBe("B");
+    expect(cashHolder({ method: "cash", byRole: "THERAPIST" }, { doctorId: "A" })).toBe("A");
+    expect(cashHolder({ method: "cash", byRole: "ADMIN" }, { doctorId: "A" })).toBeNull();
+    expect(cashHolder({ method: "upi", byRole: "THERAPIST", byDoctorId: "A" }, { doctorId: "A" })).toBeNull();
   });
 });

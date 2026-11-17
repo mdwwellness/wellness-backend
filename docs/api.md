@@ -483,15 +483,49 @@ returns the same field.
 
 ### POST `/api/appointments/:id/payout` (Admin / Super Admin)
 
-Pays a therapist what they're owed on this booking, or undoes it. The amount
-comes from the server; the split it was paid at is locked.
+Undoes a payout made on this booking before settlements existed. Therapists are
+now paid from their balance (`POST /api/payouts/settlements`), so `paid: true`
+is refused with a 400.
 
 ```jsonc
-{ "doctorId": "THR-0004", "paid": true }   // false = undo what was paid
+{ "doctorId": "THR-0004", "paid": false }   // undo what was paid
 ```
 
-Errors: `400` nothing owed / nothing paid / no split set, `404` no earnings for
+Errors: `400` paying (use settlements) / nothing paid, `404` no earnings for
 that therapist, `409` someone changed it at the same time.
+
+### GET `/api/payouts`
+
+Each therapist's balance with the clinic, all time (`lib/payouts.ts`
+`payoutBalances`). Admin / Super Admin get everyone, a therapist only
+themself, other roles a 403.
+
+```jsonc
+[{
+  "doctorId": "THR-0004", "doctor": "Asha",
+  "earned": 1560,          // their cut of done, paid-for sessions
+  "cash": [{ "enquiryId": "ENQ-0001", "amount": 1600, "at": "2026-11-01T10:00:00.000Z" }],
+  "cashTotal": 1600,       // cash they took from customers (the clinic's money they hold)
+  "paid": 0,               // older per-booking payouts + "paid" settlements
+  "received": 0,           // cash they handed back
+  "remaining": -40         // earned - cashTotal - paid + received; negative = they owe the clinic
+}]
+```
+
+Cash in hand is a cash payment the therapist recorded (`payments[].byDoctorId`;
+older ones recorded by a therapist count for the booking's therapist). Cash the
+office recorded isn't anyone's.
+
+### POST `/api/payouts/settlements` (Admin / Super Admin)
+
+Money that changed hands with a therapist: the clinic paid them (`paid`) or
+they handed cash back (`received`). Rounded to the rupee.
+
+```jsonc
+{ "doctorId": "THR-0004", "amount": 640, "direction": "received", "note": "Cash handed in" }
+```
+
+Errors: `400` amount under ₹1 or unknown direction, `404` unknown therapist.
 
 ### PUT `/api/appointments/:id`
 

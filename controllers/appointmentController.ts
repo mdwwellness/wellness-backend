@@ -538,6 +538,14 @@ export const addPayment = async (req: Request, res: Response) => {
 /** Mark a therapist's payout on a booking paid, or undo it (Admin / Super Admin, see the route). */
 export const addPayout = async (req: Request, res: Response) => {
   try {
+    // Therapists are paid from their balance now (POST /api/payouts/settlements),
+    // so a booking can't be marked paid as well; undoing an older payout still works.
+    if (req.body?.paid === true) {
+      return res.status(400).send({
+        success: false,
+        message: "Record payments with the Record payment button under Therapist payouts on the Earnings page.",
+      });
+    }
     const row = await AppointmentBooking.findById(req.params.id).exec();
     if (!row) return res.status(404).send({ success: false, message: "Appointment not found" });
     const result = await recordPayout({ row, doctorId: req.body?.doctorId, paid: req.body?.paid, user: req.user as any });

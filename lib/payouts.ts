@@ -1,5 +1,6 @@
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
+import { TherapistSettlement } from "../models/therapistSettlementModel.ts";
 import { addonPaid } from "./bookingMoney.ts";
 import { addonKey, courseSessionOf } from "./payments.ts";
 import { canManageSplit } from "./therapistSplit.ts";
@@ -325,4 +326,92 @@ export async function recordPayout(args: {
   ).exec();
   if (!booking) return { ok: false, code: 409, message: "This payout just changed - refresh and try again." };
   return { ok: true, booking };
+}
+
+/** A cash payment a therapist took from a customer: the clinic's money they hold. */
+export type CashTaken = { enquiryId: string; amount: number; at: string };
+
+/**
+ * Where a therapist stands with the clinic, all time (owner's rules, 2026-11-12):
+ * they earn their cut of done, paid-for sessions; cash they take from customers
+ * is the clinic's money they hold, so it comes off what they're paid.
+ */
+export type PayoutBalance = {
+  doctorId: string;
+  doctor: string;
+  /** Their cut of done, paid-for sessions. */
+  earned: number;
+  /** Cash they took, newest first. */
+  cash: CashTaken[];
+  cashTotal: number;
+  /** Paid to them: per-booking payouts (before settlements) and "paid" settlements. */
+  paid: number;
+  /** Cash they handed back ("received" settlements). */
+  received: number;
+  /** earned - cashTotal - paid + received. Negative: they owe the clinic. */
+  remaining: number;
+};
+
+/**
+ * Who holds a cash payment: the therapist who recorded it. Older payments
+ * (before byDoctorId) count for the booking's therapist when a therapist
+ * recorded them; cash the office recorded was taken by the office.
+ */
+export function cashHolder(payment: any, row: any): string | null {
+  if (payment?.method !== "cash") return null;
+  if (payment.byDoctorId) return String(payment.byDoctorId);
+  return payment.byRole === "THERAPIST" && row?.doctorId ? String(row.doctorId) : null;
+}
+
+/** Each therapist's balance from every booking row and settlement. */
+export function balancesOf(rows: any[], ctx: Ctx, settlements: any[], names: Map<string, string>): PayoutBalance[] {
+  const by = new Map<string, PayoutBalance>();
+  const get = (id: string, name?: string) => {
+    let b = by.get(id);
+    if (!b) {
+      b = { doctorId: id, doctor: names.get(id) || name || id, earned: 0, cash: [], cashTotal: 0, paid: 0, received: 0, remaining: 0 };
+      by.set(id, b);
+    }
+    return b;
+  };
+  for (const r of rows) {
+    for (const p of payoutOf(r, ctx)) {
+      if (!p.doctorId) continue; // no therapist assigned yet: nobody to pay (#65)
+      const b = get(p.doctorId, p.doctor);
+      b.earned += p.earned.therapistCut;
+      b.paid += p.paidOut;
+    }
+    for (const pay of r.payments ?? []) {
+      const id = cashHolder(pay, r);
+      if (!id) continue;
+      const b = get(id);
+      b.cash.push({ enquiryId: r.enquiryId ?? "", amount: num(pay.amount), at: new Date(pay.at).toISOString() });
+      b.cashTotal += num(pay.amount);
+    }
+  }
+  for (const s of settlements) {
+    const b = get(s.doctorId);
+    if (s.direction === "received") b.received += num(s.amount);
+    else b.paid += num(s.amount);
+  }
+  for (const b of by.values()) {
+    b.earned = Math.round(b.earned);
+    b.remaining = Math.round(b.earned - b.cashTotal - b.paid + b.received);
+    b.cash.sort((x, y) => y.at.localeCompare(x.at));
+  }
+  // Most to settle first.
+  return [...by.values()].sort((x, y) => Math.abs(y.remaining) - Math.abs(x.remaining) || x.doctor.localeCompare(y.doctor));
+}
+
+/** Every therapist's balance, or one therapist's. */
+export async function payoutBalances(doctorId?: string): Promise<PayoutBalance[]> {
+  const [rows, settlements, doctors] = await Promise.all([
+    AppointmentBooking.find({}, `${MONEY_FIELDS} enquiryId payments`).lean(),
+    TherapistSettlement.find(doctorId ? { doctorId } : {}).lean(),
+    Doctor.find({}, { doctorId: 1, name: 1 }).lean(),
+  ]);
+  const ctx = await contextFor(rows);
+  const names = new Map((doctors as any[]).map((d) => [d.doctorId, d.name]));
+  const all = balancesOf(rows, ctx, settlements, names);
+  return doctorId ? all.filter((b) => b.doctorId === doctorId) : all;
 }

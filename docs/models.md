@@ -146,6 +146,7 @@ discriminates between them.
 | `slot.time` | String | E.g. `"11:30"`, 24h |
 | `therapyStartTime`, `therapyEndTime` | String | Free-text time strings for in-progress sessions |
 | `meet.link`, `meet.eventId`, `meet.start`, `meet.end`, `meet.details` | String | Server-written video call of an online consultation (Google Meet on the clinic calendar, the assigned therapist invited, `lib/bookingMeet.ts`). `start`/`end` are the ISO times the event is set to; `details` is a hash of the event's text and guest, to notice a change. |
+| `payments[]` | Array | Each customer payment: `amount`, `method` (cash/upi/card/bank/other), `at`, `by` (name), `byRole`, `byDoctorId` (the therapist who took it, when a therapist recorded it: their cash in hand), `for` (an add-on's name). |
 
 ### Therapist assignment
 
@@ -220,6 +221,23 @@ creates a new record.
 
 `{ timestamps: true, versionKey: false }` — auto `createdAt` / `updatedAt`,
 no `__v` field.
+
+---
+
+## TherapistSettlement
+
+Money that changed hands between the clinic and a therapist outside a booking
+(`models/therapistSettlementModel.ts`). Recorded by Admin / Super Admin from
+the Earnings page; a therapist's balance is worked out from these, their
+earnings and the cash they hold (`lib/payouts.ts` `payoutBalances`).
+
+| Field | Type | Notes |
+|---|---|---|
+| `doctorId` | String | The therapist (THR-####), indexed |
+| `amount` | Number | Rupees, at least 1 |
+| `direction` | String | `paid` (clinic paid the therapist) or `received` (therapist handed cash back) |
+| `note` | String | Up to 200 characters |
+| `by` | String | Who recorded it |
 
 ---
 

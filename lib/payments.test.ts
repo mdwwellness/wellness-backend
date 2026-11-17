@@ -7,7 +7,8 @@ const { mockFindOneAndUpdate, mockFindById } = vi.hoisted(() => ({
 vi.mock("../models/appointmentsBookingModel.ts", () => ({
   default: { findOneAndUpdate: mockFindOneAndUpdate, findById: mockFindById },
 }));
-vi.mock("../models/doctorsModel.ts", () => ({ Doctor: { findOne: vi.fn() } }));
+const { mockDoctorFindOne } = vi.hoisted(() => ({ mockDoctorFindOne: vi.fn() }));
+vi.mock("../models/doctorsModel.ts", () => ({ Doctor: { findOne: mockDoctorFindOne } }));
 
 import { paidNeededBeforeVisit, recordPayment, unpaidBeforeComplete } from "./payments.ts";
 
@@ -39,6 +40,14 @@ describe("recordPayment", () => {
     expect(update.$inc).toEqual({ paymentAmount: 1000 });
     expect(update.$set.paymentReceived).toBe(true);
     expect(update.$push.payments).toMatchObject({ amount: 1000, method: "cash", by: "T", byRole: "THERAPIST" });
+  });
+
+  it("a therapist's payment records which therapist took it (their cash in hand); the office's doesn't", async () => {
+    mockDoctorFindOne.mockReturnValue({ lean: async () => ({ doctorId: "THR-0004" }) });
+    await recordPayment({ row, amount: 1000, method: "cash", user: { _id: "u1", role: "THERAPIST", userfName: "T" } });
+    expect(mockFindOneAndUpdate.mock.calls[0][1].$push.payments).toMatchObject({ method: "cash", byDoctorId: "THR-0004" });
+    await recordPayment({ row, amount: 1000, method: "cash", user: { _id: "u2", role: "ADMIN", userfName: "A" } });
+    expect(mockFindOneAndUpdate.mock.calls[1][1].$push.payments).not.toHaveProperty("byDoctorId");
   });
 
   it("a part-payment leaves it unpaid", async () => {

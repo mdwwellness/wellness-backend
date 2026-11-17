@@ -282,6 +282,9 @@ const AppointmentBookingSchema = new Schema({
             at: { type: Date, required: true },
             by: { type: String },
             byRole: { type: String },
+            // The therapist who took it, when a therapist recorded it: their cash
+            // in hand when the method is cash (lib/payouts.ts payoutBalances).
+            byDoctorId: { type: String },
             // Set when the payment was for an add-on, not the booking itself.
             for: { type: String },
             _id: false,
