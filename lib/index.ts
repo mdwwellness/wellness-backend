@@ -68,6 +68,9 @@ export const ROLES: Record<string, string[]> = {
   THERAPIST: THERAPIST_PERMISSIONS,
 };
 
+/** The back office. KEEP IN SYNC with OFFICE_ROLES in the dashboard's InboundBookingNotifier.tsx. */
+export const OFFICE_ROLES = ["SUPER_ADMIN", "ADMIN", "STAFF", "CUSTOMER_CARE"];
+
 export const USER_ROLES = {
   SUPER_ADMIN: "SUPER_ADMIN",
   ADMIN: "ADMIN",

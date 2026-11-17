@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Request, Response } from "express";
 
-const { mockFindById, mockFindOneAndUpdate, mockDoctorFindOne } = vi.hoisted(() => ({
+const { mockFindById, mockFindOneAndUpdate, mockDoctorFindOne, mockNotifyAssigned, mockCreateAddonVisits } = vi.hoisted(() => ({
   mockFindById: vi.fn(),
   mockFindOneAndUpdate: vi.fn(),
   mockDoctorFindOne: vi.fn(),
+  mockNotifyAssigned: vi.fn(),
+  mockCreateAddonVisits: vi.fn(),
+}));
+vi.mock("../lib/push.ts", () => ({ notifyAssigned: mockNotifyAssigned }));
+vi.mock("../lib/addonVisits.ts", async (orig) => ({
+  ...(await orig<typeof import("../lib/addonVisits.ts")>()),
+  createAddonVisits: mockCreateAddonVisits,
 }));
 vi.mock("../models/appointmentsBookingModel.ts", () => ({
   default: { findById: mockFindById, findOneAndUpdate: mockFindOneAndUpdate, findByIdAndUpdate: mockFindOneAndUpdate },
@@ -20,7 +27,7 @@ vi.mock("bcryptjs", () => ({
   default: { compare: vi.fn(async (a: string) => a === "1234"), hash: vi.fn(async () => "hash") },
 }));
 
-import { completeSession, updateAppointment, verifyVisitOtp } from "./appointmentController.ts";
+import { completeSession, confirmAppointmentRecommendation, updateAppointment, verifyVisitOtp } from "./appointmentController.ts";
 
 function res() {
   const r: any = {};
@@ -204,6 +211,23 @@ describe("updateAppointment - money fields can't be smuggled in (ISSUES #48)", (
     expect(written()).toMatchObject({ doctorId: "THR-2", therapistSplitPercent: null });
   });
 
+  it("the newly assigned therapist gets a phone alert; other saves and un-assigning send none", async () => {
+    appt.status = "scheduled";
+    let r = res();
+    await updateAppointment(put("ADMIN", { doctorId: "THR-2" }), r);
+    expect(r.status).toHaveBeenCalledWith(200);
+    expect(mockNotifyAssigned).toHaveBeenCalledTimes(1);
+    expect(mockNotifyAssigned).toHaveBeenCalledWith(appt, { actorId: "t1" });
+
+    mockNotifyAssigned.mockClear();
+    for (const body of [{ doctorId: "THR-1", note: "same therapist" }, { note: "no therapist change" }, { doctorId: "" }]) {
+      r = res();
+      await updateAppointment(put("ADMIN", body), r);
+      expect(r.status).toHaveBeenCalledWith(200);
+    }
+    expect(mockNotifyAssigned).not.toHaveBeenCalled();
+  });
+
   it("history is append-only: stored entries survive, new ones are added", async () => {
     const added = { at: "2026-10-30T10:00:00.000Z", userId: "t1", name: "T", action: "Arrived" };
     const r = res();
@@ -276,5 +300,35 @@ describe("completeSession: the work is recorded first", () => {
     expect(r.status).toHaveBeenCalledWith(402);
     expect((r.send as any).mock.calls[0][0]).toMatchObject({ short: 1000 });
     expect((r.send as any).mock.calls[0][0].message).toMatch(/before completing this visit/);
+  });
+});
+
+describe("confirming an add-on: its new visits alert the therapist", () => {
+  const confirm = (userId: string, role: string) =>
+    ({ params: { id: "a1" }, body: { serviceId: "S1", recommendedAt: "t1", code: "1234" }, user: { _id: userId, role } }) as unknown as Request;
+
+  beforeEach(() => {
+    appt = {
+      _id: "a1", doctorId: "THR-1", status: "scheduled",
+      recommendedServices: [{ serviceId: "S1", recommendedAt: "t1", serviceName: "Cupping", status: "recommended" }],
+      addonOtpHash: "hash", addonOtpExpiresAt: new Date(Date.now() + 60_000), addonOtpTarget: "S1|t1",
+    };
+  });
+
+  it("one alert for the first new visit, counting the rest", async () => {
+    const visits = [{ _id: "v1", doctorId: "THR-1" }, { _id: "v2", doctorId: "THR-1" }];
+    mockCreateAddonVisits.mockResolvedValue(visits);
+    const r = res();
+    await confirmAppointmentRecommendation(confirm("office1", "ADMIN"), r);
+    expect(r.status).toHaveBeenCalledWith(200);
+    expect(mockNotifyAssigned).toHaveBeenCalledWith(visits[0], { visits: 1, actorId: "office1" });
+  });
+
+  it("an add-on done in the visit itself makes no visits, so no alert", async () => {
+    mockCreateAddonVisits.mockResolvedValue([]);
+    const r = res();
+    await confirmAppointmentRecommendation(confirm("office1", "ADMIN"), r);
+    expect(r.status).toHaveBeenCalledWith(200);
+    expect(mockNotifyAssigned).not.toHaveBeenCalled();
   });
 });

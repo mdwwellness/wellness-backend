@@ -29,6 +29,7 @@ import { addonSessions, checkAddonSchedule, createAddonVisits } from "../lib/add
 import { addonKey, courseSessionOf, isAssignedTherapist, mayActOnBooking, moneyRowFor, recordPayment, unpaidBeforeComplete } from "../lib/payments.ts";
 import { referrerForCode } from "../lib/referralCode.ts";
 import { dropBookingMeet, syncBookingMeet } from "../lib/bookingMeet.ts";
+import { notifyAssigned } from "../lib/push.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
 import { withVisitStatus } from "../lib/visitStatus.ts";
@@ -51,6 +52,7 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
                 ? `${(req.user as any).userfName ?? ""} ${(req.user as any).userlName ?? ""}`.trim()
                 : undefined,
             email: (req.user as any)?.userEmail,
+            userId: String((req.user as any)?._id ?? ""),
         };
 
         // All creation logic - validation, ID allocation, customer linkage, and
@@ -449,6 +451,10 @@ export const confirmAppointmentRecommendation = async (req: Request, res: Respon
         const visits = updated ? await createAddonVisits(updated, updated.recommendedServices[idx], actorName) : [];
         if (updated) {
             await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
+        }
+        // New visits for the therapist: an alert unless they confirmed it themselves.
+        if (visits.length) {
+            void notifyAssigned(visits[0], { visits: visits.length - 1, actorId: String((req.user as any)?._id ?? "") });
         }
 
         return res.status(200).send({
@@ -1140,6 +1146,8 @@ export const updateAppointment = async (req: Request, res: Response) => {
         await safeSyncInvoiceFromAppointment({ appointment: updated, actor });
         // Waited on so the dashboard's refetch already shows the call link.
         await syncBookingMeet(updated);
+        // The new therapist gets a phone alert (not waited on; never throws).
+        if (assigningTherapist) void notifyAssigned(updated, { actorId });
 
         return res.status(200).send({
             success: true,

@@ -20,6 +20,7 @@ import therapistLeaveRouter from "./routes/therapistLeaveRoutes.ts";
 import customerAppRouter, { warnIfCustomerAppUnconfigured } from "./routes/customerAppRoutes.ts";
 import offerRouter from "./routes/offerRoutes.ts";
 import payoutRouter from "./routes/payoutRoutes.ts";
+import pushRouter from "./routes/pushRoutes.ts";
 import docsRouter from "./routes/docsRoutes.ts";
 import { logger } from "./lib/logger.ts";
 import { assertJwtSecrets } from "./lib/env.ts";
@@ -137,6 +138,7 @@ app.use("/api/therapist-leaves", therapistLeaveRouter);
 app.use("/api/customer-app", customerAppRouter);
 app.use("/api/offers", offerRouter);
 app.use("/api/payouts", payoutRouter);
+app.use("/api/push", pushRouter);
 app.get("/", (req, res) => {
   res.json({
     message: "Welcome to the MDW Wellness Backend",

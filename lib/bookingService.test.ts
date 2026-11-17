@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   ensureCustomer: vi.fn(),
   maybeInvoice: vi.fn(),
   syncMeet: vi.fn(),
+  notify: vi.fn(),
 }));
 
 vi.mock("../models/appointmentsBookingModel.ts", () => ({
@@ -22,6 +23,7 @@ vi.mock("../models/appointmentsBookingModel.ts", () => ({
 }));
 vi.mock("./counters.ts", () => ({ nextSequence: m.nextSequence }));
 vi.mock("./bookingMeet.ts", () => ({ syncBookingMeet: m.syncMeet }));
+vi.mock("./push.ts", () => ({ notifyNewBooking: m.notify }));
 vi.mock("./logger.ts", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("./bookingSource.ts", () => ({
   resolveBookingSource: async () => ({ ok: true, fields: { source: "online" } }),
@@ -181,6 +183,32 @@ describe("createBooking: video call", () => {
     m.find.mockResolvedValue([]);
     const result: any = await createBooking(request());
     expect(result.appointment.meet).toBeUndefined();
+  });
+});
+
+describe("createBooking: phone alerts", () => {
+  it("a new booking sends its alerts, skipping whoever made it", async () => {
+    m.find.mockResolvedValue([]);
+    await createBooking(request(), { actor: { name: "Office", userId: "u9" } });
+    expect(m.notify).toHaveBeenCalledTimes(1);
+    expect(m.notify).toHaveBeenCalledWith(m.created[0], { visits: 0, actorId: "u9" });
+  });
+
+  it("a course is one alert for session 1, with its other visits counted", async () => {
+    m.find.mockResolvedValue([]);
+    await createBooking(request({
+      _id: "c1", status: "scheduled", bookingKind: "course", totalSessions: 3, sessionsPerWeek: 2,
+      quotedPrice: 4500, slot: { date: "2030-01-07", time: "10:00" },
+    }));
+    expect(m.created).toHaveLength(3);
+    expect(m.notify).toHaveBeenCalledTimes(1);
+    expect(m.notify).toHaveBeenCalledWith(m.created[0], { visits: 2, actorId: undefined });
+  });
+
+  it("a repeat folded into an open enquiry is not a new booking, so no alert", async () => {
+    m.find.mockResolvedValue([lead()]);
+    await createBooking(request(), { foldOpenRepeats: true });
+    expect(m.notify).not.toHaveBeenCalled();
   });
 });
 

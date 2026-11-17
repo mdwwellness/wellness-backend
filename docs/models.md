@@ -241,6 +241,20 @@ earnings and the cash they hold (`lib/payouts.ts` `payoutBalances`).
 
 ---
 
+## PushSubscription
+
+A browser that turned on phone alerts (`models/pushSubscriptionModel.ts`,
+`lib/push.ts`). Only the device and whose it is: who gets which alert comes from
+the user's live role and active flag when it's sent.
+
+| Field | Type | Notes |
+|---|---|---|
+| `endpoint` | String | The browser's push service address, unique |
+| `keys.p256dh`, `keys.auth` | String | The browser's encryption keys |
+| `userId` | String | The User it alerts, indexed |
+
+---
+
 ## Customer
 
 File: [`models/customerModel.ts`](../models/customerModel.ts)

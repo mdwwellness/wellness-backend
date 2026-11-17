@@ -7,6 +7,7 @@ import { cataloguePrice, isIntake, stripServerOwned } from "./lockedFields.ts";
 import { todayInIndia } from "./personDetails.ts";
 import { syncBookingMeet } from "./bookingMeet.ts";
 import { bookingTypeOf } from "./offerings.ts";
+import { notifyNewBooking } from "./push.ts";
 import {
   ensureCustomerForAppointment,
   maybeCreateInvoiceForAppointment,
@@ -15,6 +16,8 @@ import {
 export interface CreateBookingActor {
   name?: string;
   email?: string;
+  /** Their User id: they get no phone alert about their own booking. */
+  userId?: string;
 }
 
 export interface CreateBookingOptions {
@@ -408,6 +411,7 @@ export async function createBooking(
   // service, and price but gets its own date. Only session 1 gets invoice + customer.
   const totalSessions = Number(input.totalSessions) || 0;
   const schedule = courseScheduleOf(input);
+  const followUps: any[] = [];
   if (
     input.bookingKind === "course" &&
     totalSessions > 1 &&
@@ -416,7 +420,6 @@ export async function createBooking(
     appointment._id
   ) {
     try {
-      const followUps: any[] = [];
       for (let i = 2; i <= totalSessions; i++) {
         // Its date from the schedule; its time was already checked free by the
         // double-booking guard above.
@@ -486,6 +489,9 @@ export async function createBooking(
       // Don't fail the whole booking — session 1 is already saved.
     }
   }
+
+  // Phone alerts, not waited on (they never throw). A course is one alert.
+  void notifyNewBooking(appointment, { visits: followUps.length, actorId: opts.actor?.userId });
 
   return { ok: true, folded: false, appointment };
 }

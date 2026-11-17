@@ -583,6 +583,48 @@ Errors:
 
 ---
 
+## 🔔 Phone alerts - `/api/push`
+
+Implemented in [`controllers/pushController.ts`](../controllers/pushController.ts)
+and [`lib/push.ts`](../lib/push.ts), routed in [`routes/pushRoutes.ts`](../routes/pushRoutes.ts).
+Off until `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set (see `.env.example`).
+
+Who gets an alert, decided from each user's live role when it's sent (the same
+rule as the dashboard's in-page alert), never about something they did themselves:
+- **Super Admin, Admin, Staff, Customer Care:** every new enquiry or booking
+  (`createBooking`, so the dashboard, the patient site and the Customers' App). A
+  course is one alert ("+N visits"); a repeat folded into an open enquiry is none.
+- **Therapist:** a booking assigned to them (new with a therapist, or a therapist
+  set or changed on `PUT /api/appointments/:id`), and add-on visits made for them.
+
+Alerts are sent with high urgency and a 24-hour TTL; a device the push service
+reports gone (`404`/`410`) is deleted. Sending never fails or delays the request.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/key` | required | The VAPID public key a browser subscribes with (`""` when alerts are off) |
+| POST | `/subscriptions` | required | Save this browser for the logged-in user |
+| DELETE | `/subscriptions` | required | Remove this browser (logout); only the user's own |
+
+### POST `/api/push/subscriptions`
+
+The browser's `PushSubscription.toJSON()`. Saved again on every dashboard visit;
+a device that changes hands moves to the new user. The endpoint must be `https`
+on a browser push service (`fcm.googleapis.com`, Mozilla, Windows, Apple), so a
+client can't make the server post anywhere else.
+
+```jsonc
+{ "endpoint": "https://fcm.googleapis.com/fcm/send/...", "keys": { "p256dh": "B...", "auth": "..." } }
+```
+
+Errors: `400` not a push service address, or missing / oversized keys.
+
+### DELETE `/api/push/subscriptions`
+
+```jsonc
+{ "endpoint": "https://fcm.googleapis.com/fcm/send/..." }
+```
+
 ## 📊 Analytics — `/api/metrics`
 
 Implemented in [`controllers/getAnalytics.ts`](../controllers/getAnalytics.ts),

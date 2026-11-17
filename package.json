@@ -26,7 +26,8 @@
     "nodemon": "^3.1.10",
     "pdfkit": "^0.19.1",
     "tsx": "^4.21.0",
-    "uploadthing": "^7.7.4"
+    "uploadthing": "^7.7.4",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
@@ -35,6 +36,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
+    "@types/web-push": "^3.6.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2",
     "vitest": "^5.0.0"
