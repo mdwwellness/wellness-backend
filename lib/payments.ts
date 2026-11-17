@@ -1,6 +1,7 @@
 import AppointmentBooking from "../models/appointmentsBookingModel.ts";
 import { Doctor } from "../models/doctorsModel.ts";
 import { addonPaid } from "./bookingMoney.ts";
+import { COD_BLOCKED_MESSAGE, codBlockedCheck } from "./codBlock.ts";
 
 /**
  * Money on a booking. Part-payments are allowed: each payment is appended to
@@ -209,6 +210,7 @@ export async function recordPayment(args: {
   const method = METHODS.includes(String(args.method)) ? String(args.method) : "other";
 
   if (!(price > 0)) return { ok: false, code: 400, message: "This booking has no price yet." };
+  if (method === "cash" && (await codBlockedCheck())(doc)) return { ok: false, code: 400, message: COD_BLOCKED_MESSAGE };
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, code: 400, message: "Enter the amount received." };
   }

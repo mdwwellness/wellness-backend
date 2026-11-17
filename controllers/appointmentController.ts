@@ -30,6 +30,7 @@ import { addonKey, courseSessionOf, isAssignedTherapist, mayActOnBooking, moneyR
 import { referrerForCode } from "../lib/referralCode.ts";
 import { dropBookingMeet, syncBookingMeet } from "../lib/bookingMeet.ts";
 import { notifyAssigned } from "../lib/push.ts";
+import { withCodBlock } from "../lib/codBlock.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
 import { withVisitStatus } from "../lib/visitStatus.ts";
@@ -149,7 +150,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
             success: true,
             // Each with its list status, the same for every viewer (lib/visitStatus.ts),
             // and what it earns (lib/payouts.ts).
-            data: await withPayouts(await withVisitStatus(appointmentdetails), { role, doctorId: viewerDoctorId }),
+            data: await withCodBlock(await withPayouts(await withVisitStatus(appointmentdetails), { role, doctorId: viewerDoctorId })),
         });
     } catch (error: any) {
         console.error("Error fetching details:", error);

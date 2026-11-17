@@ -55,6 +55,8 @@ const customerSchema = new Schema(
       ),
     },
     profilePhotoUrl: String,
+    // COD blacklist: no cash is taken from this customer (lib/codBlock.ts).
+    codBlocked: { type: Boolean, default: false, index: true },
     notes: [
       {
         at: { type: String, required: true },

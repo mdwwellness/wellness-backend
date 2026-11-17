@@ -13,6 +13,7 @@ import { withUniqueReferralCode } from "../lib/referralCode.ts";
 import { mayActOnTherapist, ownDoctorId } from "../lib/payments.ts";
 import { HIDDEN_FROM_THERAPISTS } from "../lib/bookingSource.ts";
 import { withPayouts } from "../lib/payouts.ts";
+import { withCodBlock } from "../lib/codBlock.ts";
 
 /**
  * The splitPercent part of a therapist update. Profile saves echo the whole
@@ -236,7 +237,7 @@ export async function getPersonalAppointments(req: Request, res: Response) {
       success: true,
       message: "Data retrived",
       // With what each visit earns (lib/payouts.ts); a therapist here is this one.
-      data: await withPayouts(data, { role: req.user?.role, doctorId: String(id) }),
+      data: await withCodBlock(await withPayouts(data, { role: req.user?.role, doctorId: String(id) })),
     })
 
   } catch (error: any) {

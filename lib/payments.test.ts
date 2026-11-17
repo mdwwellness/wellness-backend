@@ -9,6 +9,9 @@ vi.mock("../models/appointmentsBookingModel.ts", () => ({
 }));
 const { mockDoctorFindOne } = vi.hoisted(() => ({ mockDoctorFindOne: vi.fn() }));
 vi.mock("../models/doctorsModel.ts", () => ({ Doctor: { findOne: mockDoctorFindOne } }));
+// The COD blacklist (lib/codBlock.ts): empty unless a test blocks someone.
+const { mockCustomerFind } = vi.hoisted(() => ({ mockCustomerFind: vi.fn() }));
+vi.mock("../models/customerModel.ts", () => ({ default: { find: mockCustomerFind } }));
 
 import { paidNeededBeforeVisit, recordPayment, unpaidBeforeComplete } from "./payments.ts";
 
@@ -25,11 +28,31 @@ describe("paidNeededBeforeVisit", () => {
   });
 });
 
+beforeEach(() => {
+  mockCustomerFind.mockReturnValue({ lean: async () => [] });
+});
+
 describe("recordPayment", () => {
   const row = { _id: "a1", quotedPrice: 1600, paymentAmount: 600 };
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCustomerFind.mockReturnValue({ lean: async () => [] });
     mockFindOneAndUpdate.mockReturnValue({ exec: () => Promise.resolve({ ...row, paymentAmount: 1600 }) });
+  });
+
+  it("COD blacklisted: cash is refused (by customer ID, or by phone + name), other methods still work", async () => {
+    mockCustomerFind.mockReturnValue({ lean: async () => [{ customer_id: "CUST-0108", phone: 9089039839, name: "mlaunch02" }] });
+    const byId = { ...row, customer_id: "CUST-0108" };
+    // A course's later session has no customer ID: the same person by phone + name.
+    const byPerson = { ...row, phonenumber: 9089039839, name: "  MLaunch02 " };
+    for (const r of [byId, byPerson]) {
+      const res = await recordPayment({ row: r, amount: 1000, method: "cash", user: { role: "THERAPIST" } });
+      expect(res).toEqual({ ok: false, code: 400, message: "This customer is COD blacklisted: take UPI, card or a payment link, not cash." });
+    }
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+    expect((await recordPayment({ row: byId, amount: 1000, method: "upi" })).ok).toBe(true);
+    // Someone else on the same household phone isn't blocked.
+    expect((await recordPayment({ row: { ...byPerson, name: "Other Person" }, amount: 1000, method: "cash" })).ok).toBe(true);
   });
 
   it("adds to what's paid and marks it fully paid when the balance is cleared", async () => {

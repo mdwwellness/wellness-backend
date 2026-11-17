@@ -3,6 +3,7 @@ import Customer from "../models/customerModel.ts";
 import { nextSequence } from "../lib/counters.ts";
 import { formatCustomerId, withPhoneLock } from "../lib/invoiceGeneration.ts";
 import { authorNameOf, canEditNote, noteKindFor, userIdOf } from "../lib/customerNotes.ts";
+import { OFFICE_ROLES } from "../lib/index.ts";
 
 function parseSearchToPhone(q: string): number | null {
   const digits = q.replace(/[^\d]/g, "");
@@ -19,7 +20,7 @@ export async function getCustomers(req: Request, res: Response) {
       const customers = await Customer.find()
         .sort({ createdAt: -1 })
         .limit(500)
-        .select("customer_id name phone email address gender birthYear dob notes createdAt updatedAt")
+        .select("customer_id name phone email address gender birthYear dob notes codBlocked createdAt updatedAt")
         .exec();
       return res.status(200).send({ success: true, data: customers });
     }
@@ -36,7 +37,7 @@ export async function getCustomers(req: Request, res: Response) {
 
     const customers = await Customer.find(query)
       .limit(50)
-      .select("customer_id name phone email address gender birthYear dob notes createdAt updatedAt")
+      .select("customer_id name phone email address gender birthYear dob notes codBlocked createdAt updatedAt")
       .exec();
     return res.status(200).send({ success: true, data: customers });
   } catch (err: any) {
@@ -135,6 +136,17 @@ export async function updateCustomer(req: Request, res: Response) {
     const customer = await Customer.findOne({ customer_id: customerId }).exec();
     if (!customer) {
       return res.status(404).send({ success: false, message: "Customer not found" });
+    }
+
+    // COD blacklist: the office only, enforced here (lib/codBlock.ts).
+    if (patch.codBlocked !== undefined) {
+      if (typeof patch.codBlocked !== "boolean") {
+        return res.status(400).send({ success: false, message: "codBlocked must be true or false." });
+      }
+      if (!OFFICE_ROLES.includes(req.user?.role ?? "")) {
+        return res.status(403).send({ success: false, message: "Only the office can block or allow cash for a customer." });
+      }
+      customer.codBlocked = patch.codBlocked;
     }
 
     if (patch.name && typeof patch.name === "string" && patch.name.trim().length >= 2) {

@@ -8,6 +8,7 @@ import { todayInIndia } from "./personDetails.ts";
 import { syncBookingMeet } from "./bookingMeet.ts";
 import { bookingTypeOf } from "./offerings.ts";
 import { notifyNewBooking } from "./push.ts";
+import { COD_BLOCKED_MESSAGE, codBlockedCheck } from "./codBlock.ts";
 import {
   ensureCustomerForAppointment,
   maybeCreateInvoiceForAppointment,
@@ -271,6 +272,9 @@ export async function createBooking(
   // allowed, never above the price). Later money goes through lib/payments.ts.
   const price = Number(input.quotedPrice) || 0;
   const firstPayment = Math.min(paidAtBooking, price);
+  if (firstPayment > 0 && methodAtBooking === "cash" && (await codBlockedCheck())({ ...input, name })) {
+    return { ok: false, code: 400, message: COD_BLOCKED_MESSAGE };
+  }
   const paymentFields =
     firstPayment > 0
       ? {

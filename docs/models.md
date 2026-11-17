@@ -281,6 +281,7 @@ name match when one exists and links it, unless another login already owns it.
 | `city`, `pincode` | String | **New.** |
 | `emergencyContact` | `{ name, phone: Number, relation }` | **New.** No `_id` |
 | `profilePhotoUrl` | String | **New.** UploadThing URL |
+| `codBlocked` | Boolean, default `false`, indexed | **COD blacklist** (`lib/codBlock.ts`). Set with `PATCH /api/customers/:customerId` `{ "codBlocked": true \| false }` by Super Admin, Admin, Staff or Customer Care (a therapist gets `403`). While true, no cash payment is recorded for them: `POST` payments and cash paid at booking answer `400`; UPI, card and payment links still work. Their bookings come back from `GET /api/appointments` and `GET /api/therapist/:id` with `codBlocked: true`, matched by `customer_id` or phone + name. |
 | `createdAt`, `updatedAt` | Date | auto |
 
 ---

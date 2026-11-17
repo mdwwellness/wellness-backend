@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   maybeInvoice: vi.fn(),
   syncMeet: vi.fn(),
   notify: vi.fn(),
+  codBlocked: vi.fn(),
 }));
 
 vi.mock("../models/appointmentsBookingModel.ts", () => ({
@@ -24,6 +25,10 @@ vi.mock("../models/appointmentsBookingModel.ts", () => ({
 vi.mock("./counters.ts", () => ({ nextSequence: m.nextSequence }));
 vi.mock("./bookingMeet.ts", () => ({ syncBookingMeet: m.syncMeet }));
 vi.mock("./push.ts", () => ({ notifyNewBooking: m.notify }));
+vi.mock("./codBlock.ts", () => ({
+  COD_BLOCKED_MESSAGE: "COD blacklisted",
+  codBlockedCheck: async () => m.codBlocked,
+}));
 vi.mock("./logger.ts", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("./bookingSource.ts", () => ({
   resolveBookingSource: async () => ({ ok: true, fields: { source: "online" } }),
@@ -66,6 +71,7 @@ beforeEach(() => {
   m.created.length = 0;
   m.nextSequence.mockResolvedValue(100);
   m.syncMeet.mockResolvedValue(null);
+  m.codBlocked.mockReturnValue(false);
 });
 
 describe("createBooking: repeat folding", () => {
@@ -209,6 +215,26 @@ describe("createBooking: phone alerts", () => {
     m.find.mockResolvedValue([lead()]);
     await createBooking(request(), { foldOpenRepeats: true });
     expect(m.notify).not.toHaveBeenCalled();
+  });
+});
+
+describe("createBooking: COD blacklist", () => {
+  const paid = (paymentMethod: string) => request({ status: "scheduled", quotedPrice: 1600, paymentAmount: 1600, paymentMethod });
+
+  it("refuses cash taken at booking from a blacklisted customer, before anything is saved", async () => {
+    m.find.mockResolvedValue([]);
+    m.codBlocked.mockReturnValue(true);
+    expect(await createBooking(paid("cash"))).toEqual({ ok: false, code: 400, message: "COD blacklisted" });
+    expect(m.created).toHaveLength(0);
+    // The check is about this person (phone + name).
+    expect(m.codBlocked).toHaveBeenCalledWith(expect.objectContaining({ phonenumber: PHONE, name: "Asha Verma" }));
+  });
+
+  it("UPI at booking, or no payment at all, still books a blacklisted customer", async () => {
+    m.find.mockResolvedValue([]);
+    m.codBlocked.mockReturnValue(true);
+    expect((await createBooking(paid("upi"))).ok).toBe(true);
+    expect((await createBooking(request())).ok).toBe(true);
   });
 });
 
