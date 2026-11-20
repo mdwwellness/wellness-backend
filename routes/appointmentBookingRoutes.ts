@@ -12,6 +12,7 @@ import {
   getPublicPaymentSummary,
   deleteAppointment,
   getAllAppointments,
+  getBookingsVersion,
   updateAppointment,
   getTherapistSessionCounts,
   addPayment,
@@ -35,6 +36,7 @@ appointmentRouter.get("/pay/:token", getPublicPaymentSummary);
 appointmentRouter.post("/", userAuth, requireRole("SUPER_ADMIN", "ADMIN", "STAFF", "CUSTOMER_CARE"), addAppointmentsDetails);
 appointmentRouter.get("/", userAuth, getAllAppointments);
 appointmentRouter.get("/therapist-session-counts", userAuth, getTherapistSessionCounts);
+appointmentRouter.get("/version", userAuth, getBookingsVersion);
 appointmentRouter.post("/:id/pay-link", userAuth, createPaymentLink);
 // Money received (part or full); a therapist only on their own visit (checked in the handler).
 appointmentRouter.post("/:id/payments", userAuth, requireRole("SUPER_ADMIN", "ADMIN", "STAFF", "THERAPIST"), addPayment);

@@ -518,6 +518,9 @@ const AppointmentBookingSchema = new Schema({
     ],
 }, { timestamps: true, versionKey: false })
 
+// The bookings version (GET /api/appointments/version) reads the latest change.
+AppointmentBookingSchema.index({ updatedAt: -1 });
+
 const AppointmentBooking = mongoose.model('AppointmentBooking', AppointmentBookingSchema);
 
 export default AppointmentBooking;

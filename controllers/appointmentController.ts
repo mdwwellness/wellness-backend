@@ -98,53 +98,71 @@ export const addAppointmentsDetails = async (req: Request, res: Response) => {
 };
 
 
+/**
+ * A short fingerprint of the bookings this login can see: how many, and when
+ * the newest change was. Tabs poll this (a few bytes, two indexed reads at the
+ * same time) and reload the full list only when it changes, instead of
+ * downloading every booking every few seconds (ISSUES #66).
+ */
+export const getBookingsVersion = async (req: Request, res: Response) => {
+    try {
+        const scope = await bookingScopeFor(req.user);
+        if (!scope) return res.status(403).json({ success: false, message: "Forbidden: Role not allowed" });
+        if (!scope.filter) return res.status(200).send({ success: true, data: { version: "0-0" } });
+        const [latest, count] = await Promise.all([
+            AppointmentBooking.findOne(scope.filter, { updatedAt: 1 }).sort({ updatedAt: -1 }).lean() as any,
+            AppointmentBooking.countDocuments(scope.filter),
+        ]);
+        const at = latest?.updatedAt ? new Date(latest.updatedAt).getTime() : 0;
+        return res.status(200).send({ success: true, data: { version: `${count}-${at}` } });
+    } catch (error: any) {
+        return res.status(500).send({ success: false, message: error.message });
+    }
+};
+
 /** "yyyy-MM-dd" of a stored slot date (Date or string), or "". */
 const dayKey = (d: unknown): string => {
     const t = d ? new Date(d as string) : null;
     return t && !Number.isNaN(t.getTime()) ? t.toISOString().slice(0, 10) : "";
 };
 
+/**
+ * Which bookings this login may list, from the server-verified user (never a
+ * client-sent role): the back office sees all, a therapist only theirs (their
+ * Doctor profile by linked userId, else email), anyone else is refused (null).
+ * One rule for the list and its version, so the two always agree.
+ */
+async function bookingScopeFor(user: any): Promise<{ filter: Record<string, unknown> | null; viewerDoctorId: string | null } | null> {
+    const role = user?.role;
+    if (role && BACK_OFFICE_ROLES.has(role)) return { filter: {}, viewerDoctorId: null };
+    if (role !== "THERAPIST") return null;
+    const userId = user?.id ?? user?._id;
+    const doctorQuery: any = userId
+        ? { $or: [{ userId: String(userId) }, { email: user?.userEmail }] }
+        : { email: user?.userEmail };
+    const doctor = (await Doctor.findOne(doctorQuery, { doctorId: 1 }).lean()) as any;
+    // A therapist login with no profile sees an empty list (filter null).
+    return doctor?.doctorId
+        ? { filter: { doctorId: doctor.doctorId }, viewerDoctorId: doctor.doctorId }
+        : { filter: null, viewerDoctorId: null };
+}
+
 export const getAllAppointments = async (req: Request, res: Response) => {
     try {
-        // Trust the server-verified user from JWT (set by userAuth middleware),
-        // NOT the client-supplied ?role= query param - that was spoofable and
-        // also broke for back-office roles other than SUPER_ADMIN.
-        const role = req.user?.role;
-        const userEmail = req.user?.userEmail;
-        const userId = (req.user as any)?.id ?? (req.user as any)?._id;
-
-        let appointmentdetails: any[] = [];
-        let viewerDoctorId: string | null = null;
-
-        if (role && BACK_OFFICE_ROLES.has(role)) {
-            // Back-office staff (SUPER_ADMIN, ADMIN, STAFF, CUSTOMER_CARE)
-            // see every appointment / enquiry record.
-            appointmentdetails = await AppointmentBooking.find()
-                .sort({ createdAt: -1 })
-                .exec();
-        } else if (role === "THERAPIST") {
-            // Therapists see only the appointments assigned to them. Resolve
-            // their Doctor profile by the linked userId (robust to email edits),
-            // falling back to email for older records.
-            const doctorQuery: any = userId
-                ? { $or: [{ userId: String(userId) }, { email: userEmail }] }
-                : { email: userEmail };
-            const isExistingDoctor = await Doctor.findOne(doctorQuery).exec();
-            if (isExistingDoctor) {
-                const doctorId = isExistingDoctor.doctorId;
-                viewerDoctorId = doctorId ?? null;
-                appointmentdetails = await AppointmentBooking.find({ doctorId: doctorId })
-                    .select(HIDDEN_FROM_THERAPISTS)
-                    .sort({ createdAt: -1 });
-            } else {
-                appointmentdetails = [];
-            }
-        } else {
+        const scope = await bookingScopeFor(req.user);
+        if (!scope) {
             return res.status(403).json({
                 success: false,
                 message: "Forbidden: Role not allowed",
             });
         }
+        const role = req.user?.role;
+        const viewerDoctorId = scope.viewerDoctorId;
+        const appointmentdetails: any[] = !scope.filter
+            ? []
+            : role === "THERAPIST"
+                ? await AppointmentBooking.find(scope.filter).select(HIDDEN_FROM_THERAPISTS).sort({ createdAt: -1 })
+                : await AppointmentBooking.find(scope.filter).sort({ createdAt: -1 }).exec();
 
         return res.status(200).send({
             success: true,
