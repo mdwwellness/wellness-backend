@@ -30,7 +30,8 @@ import { addonKey, courseSessionOf, isAssignedTherapist, mayActOnBooking, moneyR
 import { referrerForCode } from "../lib/referralCode.ts";
 import { dropBookingMeet, syncBookingMeet } from "../lib/bookingMeet.ts";
 import { notifyAssigned } from "../lib/push.ts";
-import { withCodBlock } from "../lib/codBlock.ts";
+import { codBlockedCheck, withCodBlock } from "../lib/codBlock.ts";
+import { asListRow } from "../lib/listRows.ts";
 import { clientIp, tooManyRequests } from "../lib/rateLimit.ts";
 import { birthYearFrom, toAge, toGender } from "../lib/personDetails.ts";
 import { withVisitStatus } from "../lib/visitStatus.ts";
@@ -157,18 +158,26 @@ export const getAllAppointments = async (req: Request, res: Response) => {
             });
         }
         const role = req.user?.role;
-        const viewerDoctorId = scope.viewerDoctorId;
-        const appointmentdetails: any[] = !scope.filter
-            ? []
-            : role === "THERAPIST"
-                ? await AppointmentBooking.find(scope.filter).select(HIDDEN_FROM_THERAPISTS).sort({ createdAt: -1 })
-                : await AppointmentBooking.find(scope.filter).sort({ createdAt: -1 }).exec();
+        // Plain rows (asListRow) in one batch, with the COD blacklist read at the
+        // same time: each read is a round trip to the database (ISSUES #66).
+        const [rows, codBlocked] = await Promise.all([
+            scope.filter
+                ? AppointmentBooking.find(scope.filter)
+                    .select(role === "THERAPIST" ? HIDDEN_FROM_THERAPISTS : "")
+                    .sort({ createdAt: -1 })
+                    .batchSize(5000)
+                    .lean()
+                : [],
+            codBlockedCheck(),
+        ]);
+        // The office gets every booking, so each one's visits are already in the list.
+        const listed = await withVisitStatus(rows.map(asListRow), role !== "THERAPIST");
 
         return res.status(200).send({
             success: true,
             // Each with its list status, the same for every viewer (lib/visitStatus.ts),
             // and what it earns (lib/payouts.ts).
-            data: await withCodBlock(await withPayouts(await withVisitStatus(appointmentdetails), { role, doctorId: viewerDoctorId })),
+            data: await withCodBlock(await withPayouts(listed, { role, doctorId: scope.viewerDoctorId }), codBlocked),
         });
     } catch (error: any) {
         console.error("Error fetching details:", error);

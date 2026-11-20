@@ -41,11 +41,17 @@ export function visitStatusOf(booking: any, visits: any[]): VisitStatus | null {
   return open.doctorId || open.doctor ? "otp_pending" : null;
 }
 
-/** The rows as plain objects, each with its `visitStatus`, from all its booking's visits. */
-export async function withVisitStatus(rows: any[]): Promise<any[]> {
+/**
+ * The rows as plain objects, each with its `visitStatus`, from all its booking's
+ * visits. `allBookings`: the rows are every booking (the office list), so the
+ * visits are already among them and the lookup is skipped.
+ */
+export async function withVisitStatus(rows: any[], allBookings = false): Promise<any[]> {
   const plain = rows.map((r) => (typeof r?.toObject === "function" ? r.toObject() : r));
   const ids = plain.filter((r) => !bookingIdOf(r)).map((r) => String(r._id));
-  const visits: any[] = ids.length
+  const visits: any[] = allBookings
+    ? plain
+    : ids.length
     ? await AppointmentBooking.find(
         { $or: [{ packageOriginId: { $in: ids } }, { "addonOf.bookingId": { $in: ids } }] },
         STATUS_FIELDS,

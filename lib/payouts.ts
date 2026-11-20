@@ -237,19 +237,17 @@ async function contextFor(plain: any[]): Promise<Ctx> {
     const id = r.addonOf?.bookingId ?? (r.packageOriginId && String(r.packageOriginId) !== String(r._id) ? r.packageOriginId : null);
     if (id && !byId.has(String(id))) missing.add(String(id));
   }
-  if (missing.size) {
-    for (const m of await AppointmentBooking.find({ _id: { $in: [...missing] } }, MONEY_FIELDS).lean()) {
-      byId.set(String(m._id), m);
-    }
-  }
   const doctorIds = new Set<string>();
   for (const r of plain) {
     if (r.doctorId) doctorIds.add(r.doctorId);
     for (const s of r.sessionNotes ?? []) if (s.doctorId) doctorIds.add(s.doctorId);
   }
-  const doctors: any[] = doctorIds.size
-    ? await Doctor.find({ doctorId: { $in: [...doctorIds] } }, { doctorId: 1, splitPercent: 1 }).lean()
-    : [];
+  // Both lookups at once: each is a round trip to the database.
+  const [moneyRows, doctors]: any[][] = await Promise.all([
+    missing.size ? AppointmentBooking.find({ _id: { $in: [...missing] } }, MONEY_FIELDS).lean() : [],
+    doctorIds.size ? Doctor.find({ doctorId: { $in: [...doctorIds] } }, { doctorId: 1, splitPercent: 1 }).lean() : [],
+  ]);
+  for (const m of moneyRows) byId.set(String(m._id), m);
   return { byId, splits: new Map(doctors.map((d) => [d.doctorId, d.splitPercent ?? null])) };
 }
 

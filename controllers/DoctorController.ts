@@ -13,7 +13,8 @@ import { withUniqueReferralCode } from "../lib/referralCode.ts";
 import { mayActOnTherapist, ownDoctorId } from "../lib/payments.ts";
 import { HIDDEN_FROM_THERAPISTS } from "../lib/bookingSource.ts";
 import { withPayouts } from "../lib/payouts.ts";
-import { withCodBlock } from "../lib/codBlock.ts";
+import { codBlockedCheck, withCodBlock } from "../lib/codBlock.ts";
+import { asListRow } from "../lib/listRows.ts";
 
 /**
  * The splitPercent part of a therapist update. Profile saves echo the whole
@@ -227,17 +228,22 @@ export async function getPersonalAppointments(req: Request, res: Response) {
     }
     // Also bookings that changed hands after this therapist did sessions on them
     // (or was paid on them), so their earnings tab shows that money too.
-    const data = await AppointmentBookingModel.find({
-      $or: [{ doctorId: id }, { "sessionNotes.doctorId": id }, { "therapistPayouts.doctorId": id }],
-    })
-      .select(req.user?.role === "THERAPIST" ? HIDDEN_FROM_THERAPISTS : "")
-      .exec();
+    // Plain rows, with the COD blacklist read at the same time (ISSUES #66).
+    const [data, codBlocked] = await Promise.all([
+      AppointmentBookingModel.find({
+        $or: [{ doctorId: id }, { "sessionNotes.doctorId": id }, { "therapistPayouts.doctorId": id }],
+      })
+        .select(req.user?.role === "THERAPIST" ? HIDDEN_FROM_THERAPISTS : "")
+        .batchSize(5000)
+        .lean(),
+      codBlockedCheck(),
+    ]);
 
     return res.status(200).send({
       success: true,
       message: "Data retrived",
       // With what each visit earns (lib/payouts.ts); a therapist here is this one.
-      data: await withCodBlock(await withPayouts(data, { role: req.user?.role, doctorId: String(id) })),
+      data: await withCodBlock(await withPayouts(data.map(asListRow), { role: req.user?.role, doctorId: String(id) }), codBlocked),
     })
 
   } catch (error: any) {

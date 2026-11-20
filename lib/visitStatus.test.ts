@@ -60,4 +60,20 @@ describe("withVisitStatus: the same status for every viewer", () => {
     const [row] = await withVisitStatus([visit({ _id: "s3", packageOriginId: "c", visitOtpSentAt: new Date() })]);
     expect(row.visitStatus).toBe("visit_pending");
   });
+
+  it("the office's full list: same statuses from the rows it already has, no extra read", async () => {
+    const all = [
+      visit({ _id: "c", status: "completed", packageOriginId: "c" }),
+      visit({ _id: "s2", packageOriginId: "c", visitOtpSentAt: new Date(), visitOtpVerified: true, status: "ongoing" }),
+      visit({ _id: "h" }),
+      visit({ _id: "a1", addonOf: { bookingId: "h" }, visitOtpSentAt: new Date() }),
+    ];
+    m.stored = all;
+    const looked = (await withVisitStatus(all)).map((r) => r.visitStatus);
+    m.projection = "";
+    const fromRows = (await withVisitStatus(all, true)).map((r) => r.visitStatus);
+    expect(fromRows).toEqual(looked);
+    expect(fromRows).toEqual(["session_live", "session_live", "otp_pending", "visit_pending"]);
+    expect(m.projection).toBe("");
+  });
 });

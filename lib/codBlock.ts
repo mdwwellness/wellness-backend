@@ -24,8 +24,11 @@ export async function codBlockedCheck(): Promise<(row: any) => boolean> {
   return (row) => (!!row?.customer_id && ids.has(row.customer_id)) || people.has(person(row?.phonenumber, row?.name));
 }
 
-/** Booking rows for the dashboard, with `codBlocked: true` on those whose customer is blacklisted. */
-export async function withCodBlock<T extends Record<string, any>>(rows: T[]): Promise<T[]> {
-  const blocked = await codBlockedCheck();
+/**
+ * Booking rows for the dashboard, with `codBlocked: true` on those whose customer
+ * is blacklisted. Pass a check loaded alongside the rows to save a round trip.
+ */
+export async function withCodBlock<T extends Record<string, any>>(rows: T[], check?: (row: any) => boolean): Promise<T[]> {
+  const blocked = check ?? (await codBlockedCheck());
   return rows.map((r) => (blocked(r) ? { ...r, codBlocked: true } : r));
 }
